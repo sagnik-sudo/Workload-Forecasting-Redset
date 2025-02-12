@@ -134,3 +134,5 @@ dmypy.json
 .env.*
 /.pyenv
 .csv
+# AutoGluon
+autogluon*/
