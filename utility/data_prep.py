@@ -37,23 +37,29 @@ class SparkDataPreparer:
     def aggregate_data_by_hour(self) -> DataFrame:
         if self.df is None:
             raise ValueError("No DataFrame loaded.")
+        
         df_with_runtime = self.df.withColumn(
             "runtime_sum",
-            F.col("compile_duration_ms") + F.col("queue_duration_ms") + F.col("execution_duration_ms")
+            F.coalesce(F.col("compile_duration_ms"), F.lit(0)) + 
+            F.coalesce(F.col("queue_duration_ms"), F.lit(0)) + 
+            F.coalesce(F.col("execution_duration_ms"), F.lit(0))
         )
+
         df_with_truncated_ts = df_with_runtime.withColumn(
             "timestamp",
             F.date_format(F.date_trunc("hour", F.col("arrival_timestamp")), "yyyy-MM-dd HH:mm:ss")
         )
+
         agg_df = (
             df_with_truncated_ts
             .groupBy("instance_id", "timestamp")
             .agg(
                 F.count("*").alias("query_count"),
                 F.sum("runtime_sum").alias("runtime"),
-                F.sum("mbytes_scanned").alias("bytes_scanned")
+                F.sum(F.coalesce(F.col("mbytes_scanned"), F.lit(0))).alias("bytes_scanned")
             )
         )
+
         agg_df = agg_df.select(
             "instance_id",
             "timestamp",
@@ -61,6 +67,7 @@ class SparkDataPreparer:
             "runtime",
             "bytes_scanned"
         )
+
         self.ensure_required_columns(agg_df, self.REQUIRED_OUTPUT_COLS)
         return agg_df
 
