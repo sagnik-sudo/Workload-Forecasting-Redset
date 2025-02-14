@@ -42,4 +42,25 @@ def train_test_split(data):
     Returns:
         fist training set, first test set, second training set, second test set
     """
-    return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+
+    # Determine the cutoff date for splitting
+    # Get the latest date in the dataset and reset to midnight
+    latest_date = data["timestamp"].max().normalize()
+
+    cutoff_date_1 = latest_date - pd.Timedelta(weeks=2)
+    cutoff_date_2 = latest_date - pd.Timedelta(weeks=1)
+
+    train1 = data[data["timestamp"] < cutoff_date_1]
+    train2 = data[data["timestamp"] < cutoff_date_2]
+
+    test1 = data[
+        (data["timestamp"] >= cutoff_date_1)
+        & (data["timestamp"] < cutoff_date_2)
+    ]
+
+    test2 = data[
+        (data["timestamp"] >= cutoff_date_2)
+        & (data["timestamp"] < latest_date)
+    ]
+
+    return train1, test1, train2, test2
