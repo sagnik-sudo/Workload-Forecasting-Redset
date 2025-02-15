@@ -67,7 +67,7 @@ gluonts==0.16.0
 google-api-core==2.24.1
 google-auth==2.38.0
 googleapis-common-protos==1.66.0
-graphviz==0.20.3
+graphviz==0.8.4
 grpcio==1.70.0
 huggingface-hub==0.28.1
 hyperopt==0.2.7
@@ -109,6 +109,7 @@ msgpack==1.1.0
 multidict==6.1.0
 multiprocess==0.70.16
 murmurhash==1.0.12
+mxnet==1.6.0
 narwhals==1.26.0
 nest-asyncio==1.6.0
 networkx==3.4.2
@@ -175,6 +176,7 @@ safetensors==0.5.2
 scikit-image==0.24.0
 scikit-learn==1.5.2
 scipy==1.15.1
+seaborn==0.13.2
 sentencepiece==0.2.0
 seqeval==1.2.2
 shellingham==1.5.4
@@ -203,6 +205,7 @@ timm==1.0.3
 tokenizers==0.21.0
 toolz==0.12.1
 torch==2.5.1
+torchaudio==2.5.1
 torchmetrics==1.2.1
 torchvision==0.20.1
 tornado==6.4.2
