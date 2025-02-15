@@ -124,7 +124,7 @@ class DataManager:
         # reset the latest timestamp to midnight. This ensures that
         # only full days are included<s
         latest_date = data["timestamp"].max().normalize()
-        data = data[data["timestamp"] <= latest_date]
+        data = data[data["timestamp"] < latest_date]
 
         # Create a new column 'week' representing the week period (using ISO week)
         data["week"] = data["timestamp"].dt.to_period("W")
