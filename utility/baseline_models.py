@@ -73,7 +73,7 @@ class DeepARGluonTS:
             trainer_kwargs={"max_epochs": self.hyperparameters["epochs"]}  # PyTorch trainer
         )
 
-        # Train model (Fix: Correct .train() method)
+        # Train model
         print("Training started...")
         self.model = estimator.train(training_data=prepared_data)
         print("Training completed.")
