@@ -3,6 +3,7 @@ import numpy as np
 import os
 from typing import Dict
 from autogluon.timeseries import TimeSeriesPredictor
+from typing import List, Dict
 
 class DeepAR:
     """
@@ -132,3 +133,62 @@ class DeepAR:
         
         self.model = TimeSeriesPredictor.load(path)
         print(f"Model loaded from {path}.")
+    
+    def train_with_cv_and_tuning(
+        self,
+        train_data: pd.DataFrame,
+        target_column: str = "query_count",
+        hyperparams_list: List[Dict] = None,
+        num_val_windows: int = 3,
+        eval_metric: str = "WQL"
+    ):
+        """
+        Trains the DeepAR model with multiple hyperparameter configurations
+        and rolling-window cross-validation, then picks the best model.
+        
+        :param train_data: The training DataFrame (with 'timestamp' and target_column).
+        :param target_column: The name of the target column.
+        :param hyperparams_list: A list of dictionaries of hyperparameters for DeepAR.
+        :param num_val_windows: Number of rolling windows to use for cross-validation.
+        :param eval_metric: The evaluation metric to use, e.g. "WQL", "MASE", etc.
+        """
+        if hyperparams_list is None or len(hyperparams_list) == 0:
+            # default to a single set
+            hyperparams_list = [
+                {
+                    "epochs": 20,
+                    "learning_rate": 1e-3,
+                    "num_layers": 2,
+                    "hidden_size": 40,
+                    "dropout_rate": 0.1,
+                    "batch_size": 32
+                }
+            ]
+            
+        # Prepare data (long format)
+        prepared_data = self.prepare_data(train_data, target_column=target_column)
+        
+        # Construct a hyperparameters dict recognized by AutoGluon (list under "DeepAR" key)
+        hyperparams = {"DeepAR": hyperparams_list}
+        
+        # Create a new predictor
+        from autogluon.timeseries import TimeSeriesPredictor
+        
+        predictor = TimeSeriesPredictor(
+            target=target_column,
+            prediction_length=self.prediction_length,
+            freq=self.freq,
+            eval_metric=eval_metric
+        )
+        
+        # Fit with cross-validation (num_val_windows) and the given hyperparams
+        predictor.fit(
+            train_data=prepared_data,
+            hyperparameters=hyperparams,
+            num_val_windows=num_val_windows,
+            verbosity=2  # for more detailed logs
+        )
+        
+        # Store the best predictor in self.model
+        self.model = predictor
+        print("Cross-validation and hyperparameter tuning complete. Best model stored in self.model.")
