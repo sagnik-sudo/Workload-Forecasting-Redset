@@ -1,142 +1,134 @@
 import pandas as pd
 import numpy as np
-import torch
-import pickle
 import os
-
-from gluonts.dataset.common import ListDataset
-from gluonts.evaluation import Evaluator
-from gluonts.evaluation.backtest import make_evaluation_predictions
-from gluonts.torch.model.deepar import DeepAREstimator
-from gluonts.dataset.util import to_pandas
 from typing import Dict
+from autogluon.timeseries import TimeSeriesPredictor
 
-
-class DeepARGluonTS:
+class DeepAR:
     """
-    DeepAR implementation for workload forecasting using GluonTS (Torch).
-    Supports training, prediction, evaluation, saving/loading models.
+    DeepAR implementation for workload forecasting using AutoGluon TimeSeries.
+    This implementation explicitly configures AutoGluon to use the DeepAR model.
+    Supports training, prediction, evaluation, and saving/loading models.
     """
 
-    def __init__(self, prediction_length: int, freq: str = "H", hyperparameters: Dict = None, use_gpu: bool = False):
-        print("Initializing DeepARGluonTS Model...")
+    def __init__(self, prediction_length: int, freq: str = "H", hyperparameters: Dict = None):
+        print("Initializing DeepARAutogluonTS Model...")
         self.prediction_length = prediction_length
         self.freq = freq
         self.model = None
-
-        # Use Torch device selection (Supports M1/M2 GPUs)
-        if torch.backends.mps.is_available():
-            self.device = torch.device("mps")  # Apple Metal for M1/M2
-        elif torch.cuda.is_available():
-            self.device = torch.device("cuda")  # NVIDIA GPU
-        else:
-            self.device = torch.device("cpu")   # Fallback to CPU
-
-        # Default hyperparameters
-        self.hyperparameters = hyperparameters or {
+        
+        # Default hyperparameters for the DeepAR model in AutoGluon.
+        # By wrapping the parameters in a dictionary with the key "DeepAR",
+        # we ensure that AutoGluon uses only the DeepAR model.
+        default_deepar_hp = {
             "epochs": 50,
             "learning_rate": 1e-3,
             "num_layers": 2,
             "hidden_size": 40,
             "dropout_rate": 0.1,
             "batch_size": 32,
-            "context_length": prediction_length,  
+            "context_length": prediction_length,
         }
+        # Explicitly force usage of DeepAR by setting the key.
+        self.hyperparameters = hyperparameters or {"DeepAR": default_deepar_hp}
 
-    def prepare_data(self, data: pd.DataFrame, target_column: str = "query_count"):
+    def prepare_data(self, data: pd.DataFrame, target_column: str = "query_count") -> pd.DataFrame:
         """
-        Converts pandas DataFrame into GluonTS ListDataset format.
+        Converts a pandas DataFrame into the long format expected by AutoGluon TimeSeries.
+        Assumes input DataFrame has columns 'timestamp' and target_column.
         """
+        data = data.copy()
         data["timestamp"] = pd.to_datetime(data["timestamp"])
         data = data.sort_values("timestamp")
-
-        # Convert to ListDataset format
-        dataset = ListDataset(
-            [{"start": data["timestamp"].iloc[0], "target": data[target_column].values}],
-            freq=self.freq
-        )
-        return dataset
+        # Add a constant item_id since we are forecasting a single time series.
+        data["item_id"] = "item_1"
+        # Rearranging columns if needed.
+        data = data[["item_id", "timestamp", target_column]]
+        return data
 
     def train(self, train_data: pd.DataFrame, target_column: str = "query_count"):
-        """Trains DeepAR model."""
+        """
+        Trains the DeepAR model using AutoGluon TimeSeries.
+        """
         prepared_data = self.prepare_data(train_data, target_column)
-
-        # Define DeepAR Estimator (Torch-based)
-        estimator = DeepAREstimator(
-            freq=self.freq,
+        
+        # Initialize the TimeSeriesPredictor with the target, prediction length, and frequency.
+        print("Training started using DeepAR...")
+        self.model = TimeSeriesPredictor(
+            target=target_column,
             prediction_length=self.prediction_length,
-            context_length=self.hyperparameters["context_length"],
-            num_layers=self.hyperparameters["num_layers"],
-            hidden_size=self.hyperparameters["hidden_size"],
-            dropout_rate=self.hyperparameters["dropout_rate"],
-            batch_size=self.hyperparameters["batch_size"],
-            trainer_kwargs={"max_epochs": self.hyperparameters["epochs"]}  # PyTorch trainer
+            freq=self.freq,
         )
-
-        # Train model
-        print("Training started...")
-        self.model = estimator.train(training_data=prepared_data)
-        print("Training completed.")
+        
+        # Fit the predictor with the specified DeepAR hyperparameters.
+        self.model.fit(
+            train_data=prepared_data,
+            hyperparameters=self.hyperparameters,
+            # You can pass additional parameters such as time_limit if needed.
+        )
+        print("Training completed using DeepAR.")
 
     def predict(self, test_data: pd.DataFrame, target_column: str = "query_count") -> pd.DataFrame:
-        """Generates predictions using the trained model."""
+        """
+        Generates predictions using the trained model.
+        Returns a DataFrame with timestamps and prediction statistics.
+        """
         if self.model is None:
             raise ValueError("Model must be trained before making predictions.")
-
+        
         prepared_data = self.prepare_data(test_data, target_column)
-
-        # Make Predictions
-        forecast_it, ts_it = make_evaluation_predictions(
-            dataset=prepared_data,
-            predictor=self.model,
-            num_samples=100
-        )
-
-        forecasts = list(forecast_it)[0]
-        timestamps = list(to_pandas(next(ts_it)).index)
-
-        # Convert predictions to DataFrame
+        predictions = self.model.predict(prepared_data)
+        
+        # Extract forecasts for our single time series (item_id = "item_1").
+        # The predictions DataFrame index is 'timestamp' and the columns include the forecast quantiles.
+        # Here we compute the mean forecast and select quantiles for lower and upper bounds.
+        forecast = predictions.loc["item_1"]
+        forecast = forecast.reset_index().rename(columns={"index": "timestamp"})
+        
+        # Check if AutoGluon returns quantile columns (they usually have names like '0.1', '0.5', '0.9')
+        # Here we assume the median is our best estimate for the mean forecast.
+        lower_bound = forecast["0.1"] if "0.1" in forecast.columns else None
+        upper_bound = forecast["0.9"] if "0.9" in forecast.columns else None
+        mean_forecast = forecast["0.5"] if "0.5" in forecast.columns else forecast.iloc[:, 1]  # fallback
+        
         predictions_df = pd.DataFrame({
-            "timestamp": timestamps[-self.prediction_length:],
-            "mean": forecasts.mean,
-            "lower_bound": forecasts.quantile(0.1),
-            "upper_bound": forecasts.quantile(0.9)
+            "timestamp": forecast["timestamp"],
+            "mean": mean_forecast,
+            "lower_bound": lower_bound,
+            "upper_bound": upper_bound,
         })
-
+        
         return predictions_df
 
     def evaluate(self, test_data: pd.DataFrame, target_column: str = "query_count") -> Dict[str, float]:
-        """Evaluates model using RMSE."""
+        """
+        Evaluates the model using the built-in AutoGluon evaluation.
+        Returns a dictionary of evaluation metrics.
+        """
         if self.model is None:
             raise ValueError("Model must be trained before evaluation.")
-
+        
         prepared_data = self.prepare_data(test_data, target_column)
-
-        # Generate Predictions
-        forecast_it, ts_it = make_evaluation_predictions(
-            dataset=prepared_data,
-            predictor=self.model,
-            num_samples=100
-        )
-
-        forecasts = list(forecast_it)
-        tss = list(ts_it)
-
-        # Compute Evaluation Metrics
-        evaluator = Evaluator()
-        agg_metrics, _ = evaluator(iter(tss), iter(forecasts))
-
-        return {"RMSE": agg_metrics["RMSE"]}
+        # AutoGluon provides an evaluate method that prints metrics; here we capture the returned scores.
+        results = self.model.evaluate(prepared_data)
+        return results
 
     def save_model(self, path: str):
-        """Saves the trained model using PyTorch's save function."""
-        torch.save(self.model, path)
+        """
+        Saves the trained model to disk.
+        """
+        if self.model is None:
+            raise ValueError("No trained model to save.")
+        
+        self.model.save(path)
         print(f"Model saved successfully to {path}.")
 
     def load_model(self, path: str):
-        """Loads a trained model using PyTorch's load function."""
+        """
+        Loads a trained model from disk.
+        """
         if not os.path.exists(path):
             raise FileNotFoundError(f"No model file found at {path}")
-
-        self.model = torch.load(path)
+        
+        self.model = TimeSeriesPredictor.load(path)
         print(f"Model loaded from {path}.")
