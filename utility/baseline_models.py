@@ -113,15 +113,15 @@ class DeepAR:
         results = self.model.evaluate(prepared_data)
         return results
 
-    def save_model(self, path: str):
+    def save_model(self):
         """
         Saves the trained model to disk.
         """
         if self.model is None:
             raise ValueError("No trained model to save.")
         
-        self.model.save(path)
-        print(f"Model saved successfully to {path}.")
+        self.model.save()
+        print(f"Model saved successfully.")
 
     def load_model(self, path: str):
         """
