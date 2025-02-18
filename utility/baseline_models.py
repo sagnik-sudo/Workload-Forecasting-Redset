@@ -12,7 +12,7 @@ class DeepAR:
     Supports training, prediction, evaluation, and saving/loading models.
     """
 
-    def __init__(self, prediction_length: int, freq: str = "H", hyperparameters: Dict = None):
+    def __init__(self, prediction_length: int, freq: str = "h", hyperparameters: Dict = None):
         print("Initializing DeepARAutogluonTS Model...")
         self.prediction_length = prediction_length
         self.freq = freq
@@ -59,6 +59,7 @@ class DeepAR:
             target=target_column,
             prediction_length=self.prediction_length,
             freq=self.freq,
+            eval_metric='SMAPE'
         )
         
         # Fit the predictor with the specified DeepAR hyperparameters.
@@ -103,17 +104,65 @@ class DeepAR:
 
     def evaluate(self, test_data: pd.DataFrame, target_column: str = "query_count") -> Dict[str, float]:
         """
-        Evaluates the model using the built-in AutoGluon evaluation.
-        Returns a dictionary of evaluation metrics.
+        Evaluates the model using custom metrics: q-error, MAE, and RME.
+        Instead of merging on timestamps (which can fail if the test timestamps
+        do not match the forecast horizon timestamps), this version assumes that
+        the actual values for evaluation are the last `prediction_length` rows of
+        the prepared test data (sorted by timestamp).
+        
+        Returns a dictionary with the computed metrics.
         """
         if self.model is None:
             raise ValueError("Model must be trained before evaluation.")
         
+        # Prepare the data in long format
         prepared_data = self.prepare_data(test_data, target_column)
-        # AutoGluon provides an evaluate method that prints metrics; here we capture the returned scores.
-        results = self.model.evaluate(prepared_data)
-        return results
-
+        # Sort the prepared data to ensure chronological order
+        prepared_data = prepared_data.sort_values("timestamp").reset_index(drop=True)
+        
+        # Get forecast predictions (using the mean forecast as our estimate)
+        predictions_df = self.predict(test_data, target_column)
+        predictions_df = predictions_df.reset_index(drop=True)
+        
+        # Instead of merging by timestamp, assume that the actual values for the forecast horizon
+        # are the last `prediction_length` rows of the prepared data.
+        if len(prepared_data) < self.prediction_length:
+            raise ValueError("Not enough test data to cover the forecast horizon.")
+        
+        actual_forecast = prepared_data.iloc[-self.prediction_length:].reset_index(drop=True)
+        
+        if len(actual_forecast) != len(predictions_df):
+            raise ValueError("Mismatch between forecast length and actuals length.")
+        
+        forecast = predictions_df["mean"].values
+        actual = actual_forecast[target_column].values
+        
+        # To avoid division by zero, add a small epsilon
+        epsilon = 1e-10
+        
+        # Compute MAE
+        mae = np.mean(np.abs(forecast - actual))
+        
+        # Compute q-error for each forecast point
+        q_errors = np.maximum(forecast / (actual + epsilon), actual / (forecast + epsilon))
+        q_error = np.mean(q_errors)
+        
+        # Compute Relative Mean Error (RME)
+        rme = np.mean(np.abs(forecast - actual) / (np.abs(actual) + epsilon))
+        
+        metrics = {
+            "q_error": q_error,
+            "mae": mae,
+            "rme": rme
+        }
+        
+        print("Evaluation Metrics:")
+        print(f"Q-error: {q_error:.4f}")
+        print(f"MAE: {mae:.4f}")
+        print(f"RME: {rme:.4f}")
+        
+        return metrics
+    
     def save_model(self):
         """
         Saves the trained model to disk.
