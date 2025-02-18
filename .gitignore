@@ -137,4 +137,5 @@ dmypy.json
 # AutoGluon
 autogluon*/
 
-pyenv/
+# Lightning Logs
+lightning_logs/
