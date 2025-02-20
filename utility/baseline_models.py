@@ -4,6 +4,8 @@ import os
 from typing import Dict
 from autogluon.timeseries import TimeSeriesPredictor
 from typing import List, Dict
+from sklearn.metrics import mean_absolute_error, mean_absolute_percentage_error, mean_squared_error
+import matplotlib.pyplot as plt
 
 class DeepAR:
     """
@@ -192,3 +194,71 @@ class DeepAR:
         # Store the best predictor in self.model
         self.model = predictor
         print("Cross-validation and hyperparameter tuning complete. Best model stored in self.model.")
+
+"""Sesonal naive weekly forecasting method to get the simple baseline model"""
+
+class SeasonalNaiveForecasting:
+    def __init__(self, cluster_type, instance_id):
+        """Initialize with cluster type and instance ID."""
+        self.data_manager = DataManager(cluster_type, instance_id)  # Use DataManager from helpers.py
+        self.sorted_df = None
+
+    def process(self):
+        """Load and preprocess data using helper functions."""
+        self.sorted_df = self.data_manager.load_data()
+        self.sorted_df['query_count'] = np.log1p(self.sorted_df['query_count'])
+        self.sorted_df['timestamp'] = pd.to_datetime(data['timestamp'])
+        # Sort the data by timestamp
+        self.sorted_df = data.sort_values('timestamp')
+        return self.sorted_df
+
+    def train_test_split_weekly(self):
+        """Perform rolling window cross-validation using helper functions."""
+        return self.data_manager.train_test_split()
+
+    def seasonal_naive_forecast(self, train_df, test_df):
+        """Generate forecasts using a simple seasonal naive approach."""
+        forecast_start = test_df["timestamp"].min()
+        last_week_data = train_df.loc[
+            train_df["timestamp"] >= (forecast_start - pd.Timedelta(days=7))
+        ]
+
+        if last_week_data.empty:
+            raise ValueError("ERROR: Not enough past data to make seasonal naive predictions!")
+
+        last_week_values = last_week_data["query_count"].values[-len(test_df):]
+        forecast = pd.Series(last_week_values, index=test_df.index)
+        return forecast
+
+    def evaluate_q_error(self, actuals, predicted):
+        """Compute Q-error and additional evaluation metrics."""
+        epsilon = 1e-10
+        q_errors = np.maximum(predicted / (actuals + epsilon), actuals / (predicted + epsilon))
+        fraction_within_2 = np.mean((actuals / 2 <= predicted) & (predicted <= actuals * 2))
+        q_error_percentiles = {f"P{p}": np.percentile(q_errors, p) for p in range(10, 100, 10)}
+
+        mae = mean_absolute_error(actuals, predicted)
+        rmse = np.sqrt(mean_squared_error(actuals, predicted))
+        mape = np.mean(np.abs((actuals - predicted) / (actuals + epsilon))) * 100
+        smape = np.mean(2 * np.abs(actuals - predicted) / (np.abs(actuals) + np.abs(predicted) + epsilon)) * 100
+
+        return {
+            "MAE": mae, "RMSE": rmse, "MAPE": mape, "sMAPE": smape,
+            "Fraction Within Factor of 2": fraction_within_2, "Q-Error Percentiles": q_error_percentiles
+        }
+
+    def run(self):
+        """Run the entire forecasting pipeline"""
+        processed_df = self.process()
+        train_test_splits = self.data_manager.train_test_split(processed_df)
+
+        for i, (train_df, test_df) in enumerate(train_test_splits):
+            forecast = self.seasonal_naive_forecast(train_df, test_df)
+            results = self.evaluate_q_error(test_df["query_count"].values, forecast.values)
+            print(f" Evaluation Metrics for Split {i+1}: {results}")
+
+
+# Run this to get Full Pipeline access for seasonal_naive
+"""if __name__ == "__main__":
+    model = SeasonalNaiveForecasting(cluster_type="provisioned", instance_id=96)
+    model.run()"""

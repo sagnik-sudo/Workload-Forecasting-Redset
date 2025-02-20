@@ -1,0 +1,9 @@
+matplotlib
+seaborn
+pandas
+numpy
+scipy
+tensorflow
+scikit-learn
+autogluon
+gluonts
