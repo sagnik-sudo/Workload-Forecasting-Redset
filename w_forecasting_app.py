@@ -1,13 +1,21 @@
 import gradio as gr
 import pandas as pd
+import numpy as np
 from datetime import datetime
+import os
+import logging
 from utility.helpers import DataManager
-from utility.baseline_models import DeepAR
-import utility.visualization
+from utility.baseline_models import DeepAR  # Updated DeepAR implementation
 import matplotlib.pyplot as plt
 import seaborn as sns
 import io
-from PIL import Image  # Added to convert BytesIO to a PIL image
+from PIL import Image  # To convert BytesIO to a PIL image
+
+# Set environment variables and logging settings
+os.environ["OMP_NUM_THREADS"] = "2"  # Prevent excessive parallelism
+os.environ["AUTOGLUON_DEVICE"] = "cpu"  # Ensure CPU-only execution
+logging.basicConfig(level=logging.INFO)
+logging.getLogger("autogluon").setLevel(logging.DEBUG)
 
 # Global variables
 data = None
@@ -67,6 +75,8 @@ def load_data(dataset_type, instance_number):
         data = datamanager.load_data()
         data["timestamp"] = pd.to_datetime(data["timestamp"])
         data = data.sort_values("timestamp")
+        # Apply log transform to query_count
+        data["query_count"] = np.log1p(data["query_count"])
         return "Data loaded successfully!", data.head().to_string()
     except Exception as e:
         return f"Error loading data: {str(e)}", ""
@@ -81,9 +91,8 @@ def visualize_data():
         plt.title("Data Visualization")
         buf = io.BytesIO()
         plt.savefig(buf, format="png", bbox_inches="tight")
-        plt.close()  # Close the figure to avoid overlapping plots
+        plt.close()
         buf.seek(0)
-        # Convert buffer to a PIL Image
         img = Image.open(buf)
         return "Visualization generated!", img
     except Exception as e:
@@ -108,16 +117,37 @@ def train_model(prediction_duration, model_choice):
         return "Load data and perform train-test split first!"
     try:
         if model_choice == "DeepAR":
-            model = DeepAR(prediction_duration)
+            # Hyperparameters dictionary as in the notebook
+            hyperparameters = {
+                'DeepAR': {
+                    'num_layers': 2,
+                    'hidden_size': 40,
+                    'dropout_rate': 0.2,
+                    'learning_rate': 5e-4,
+                    'patience': 5,
+                    'max_epochs': 50,
+                    'context_length': 48,
+                    'use_feat_dynamic_real': True,
+                    'batch_size': 8,
+                    'freq': 'H',
+                    'verbosity': 2
+                }
+            }
+            # Instantiate DeepAR with forecast horizon and hyperparameters
+            model = DeepAR(prediction_length=prediction_duration, freq="h", hyperparameters=hyperparameters)
+            # Train using the target column "query_count"
+            model.train(train1, target_column="query_count")
         elif model_choice == "Seasonal Naive":
             model = SeasonalNaive(prediction_duration)
+            model.train(train1)
         elif model_choice == "PatchTFT":
             model = PatchTFT(prediction_duration)
+            model.train(train1)
         elif model_choice == "DeepSeq":
             model = DeepSeq(prediction_duration)
+            model.train(train1)
         else:
             return f"Invalid model choice: {model_choice}"
-        model.train(train1)
         return "Model trained successfully!"
     except Exception as e:
         return f"Error training model: {str(e)}"
@@ -128,10 +158,35 @@ def predict():
     if test1 is None or model is None:
         return "Ensure data is loaded, train-test split is done, and model is trained first!", ""
     try:
-        predictions = model.predict(test1)
+        if isinstance(model, DeepAR):
+            # Determine forecast horizon from the last training timestamp
+            last_train_ts = train1["timestamp"].max()
+            start_forecast = last_train_ts + pd.Timedelta(hours=1)
+            end_forecast = start_forecast + pd.Timedelta(hours=model.prediction_length - 1)
+            test_forecast = test1[(test1["timestamp"] >= start_forecast) & (test1["timestamp"] <= end_forecast)]
+            predictions = model.predict(test_forecast, target_column="query_count")
+        else:
+            predictions = model.predict(test1)
         return "Predictions generated successfully!", predictions.to_string()
     except Exception as e:
         return f"Error during prediction: {str(e)}", ""
+
+def evaluate_model():
+    """Evaluate the trained DeepAR model on the test forecast horizon."""
+    if test1 is None or model is None:
+        return "Ensure data is loaded, train-test split is done, and model is trained first!", ""
+    try:
+        if isinstance(model, DeepAR):
+            last_train_ts = train1["timestamp"].max()
+            start_forecast = last_train_ts + pd.Timedelta(hours=1)
+            end_forecast = start_forecast + pd.Timedelta(hours=model.prediction_length - 1)
+            test_forecast = test1[(test1["timestamp"] >= start_forecast) & (test1["timestamp"] <= end_forecast)]
+            evaluation_results = model.evaluate(test_forecast, target_column="query_count")
+            return "Evaluation successful!", str(evaluation_results)
+        else:
+            return "Evaluation is implemented only for DeepAR in this demo.", ""
+    except Exception as e:
+        return f"Error during evaluation: {str(e)}", ""
 
 def visualize_predictions():
     """Visualize actual vs predicted values."""
@@ -139,14 +194,20 @@ def visualize_predictions():
         return "Ensure data is loaded and predictions are generated first!", None
     try:
         plt.figure(figsize=(10, 5))
-        sns.lineplot(x=test1["timestamp"], y=test1["query_count"], label="Actual")
+        if isinstance(model, DeepAR):
+            last_train_ts = train1["timestamp"].max()
+            start_forecast = last_train_ts + pd.Timedelta(hours=1)
+            end_forecast = start_forecast + pd.Timedelta(hours=model.prediction_length - 1)
+            test_forecast = test1[(test1["timestamp"] >= start_forecast) & (test1["timestamp"] <= end_forecast)]
+            sns.lineplot(x=test_forecast["timestamp"], y=test_forecast["query_count"], label="Actual")
+        else:
+            sns.lineplot(x=test1["timestamp"], y=test1["query_count"], label="Actual")
         sns.lineplot(x=predictions["timestamp"], y=predictions["mean"], label="Predicted", linestyle="dashed")
         plt.title("Prediction vs Actual")
         buf = io.BytesIO()
         plt.savefig(buf, format="png", bbox_inches="tight")
         plt.close()
         buf.seek(0)
-        # Convert buffer to a PIL Image
         img = Image.open(buf)
         return "Prediction visualization generated!", img
     except Exception as e:
@@ -179,7 +240,7 @@ with gr.Blocks() as app:
     # Function to update model description dynamically.
     def update_model_description(model_choice):
         if model_choice == "DeepAR":
-            return "**DeepAR:** Baseline model using the DeepAR method."
+            return "**DeepAR:** Baseline model using AutoGluon DeepAR with forecast horizon and evaluation."
         elif model_choice == "Seasonal Naive":
             return "**Seasonal Naive:** Baseline model that leverages seasonal patterns."
         elif model_choice == "PatchTFT":
@@ -189,14 +250,12 @@ with gr.Blocks() as app:
         else:
             return ""
     
-    # Update the model description when the selection changes.
     model_selection.change(
         update_model_description, 
         inputs=[model_selection], 
         outputs=[model_description]
     )
     
-    # When confirming the model selection, store the selected value and reveal the rest of the UI.
     def confirm_model(model_choice):
         return gr.update(visible=True), model_choice
     
@@ -247,10 +306,9 @@ with gr.Blocks() as app:
             )
             
             with gr.Row():
-                prediction_duration_input = gr.Number(label="Prediction Duration", value=7)
+                prediction_duration_input = gr.Number(label="Prediction Duration (hours)", value=168)
                 train_model_btn = gr.Button("Train Model")
             train_model_message = gr.Textbox(label="Model Training Status", interactive=False)
-            # Pass the prediction duration and the confirmed model selection state.
             train_model_btn.click(
                 train_model,
                 inputs=[prediction_duration_input, selected_model],
@@ -259,7 +317,7 @@ with gr.Blocks() as app:
         
         # --- Predictions Tab ---
         with gr.TabItem("Predictions"):
-            gr.Markdown("### Generate and Visualize Predictions")
+            gr.Markdown("### Generate, Evaluate and Visualize Predictions")
             predict_btn = gr.Button("Make Predictions")
             predict_message = gr.Textbox(label="Prediction Message", interactive=False)
             prediction_output = gr.Textbox(label="Predictions", interactive=False)
@@ -267,6 +325,14 @@ with gr.Blocks() as app:
                 predict,
                 inputs=[],
                 outputs=[predict_message, prediction_output]
+            )
+            
+            evaluate_btn = gr.Button("Evaluate Model")
+            eval_message = gr.Textbox(label="Evaluation Metrics", interactive=False)
+            evaluate_btn.click(
+                evaluate_model,
+                inputs=[],
+                outputs=[eval_message]
             )
             
             visualize_pred_btn = gr.Button("Visualize Predictions")
