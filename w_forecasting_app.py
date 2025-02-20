@@ -3,7 +3,7 @@ import pandas as pd
 from datetime import datetime
 from utility.helpers import DataManager
 from utility.baseline_models import DeepAR
-import visualization
+import utility.visualization
 import matplotlib.pyplot as plt
 import seaborn as sns
 import io
@@ -15,6 +15,49 @@ datamanager = None
 train1, test1, train2, test2 = None, None, None, None
 model = None
 predictions = None
+
+# Placeholder implementations for additional models
+class SeasonalNaive:
+    def __init__(self, prediction_duration):
+        self.prediction_duration = prediction_duration
+        self.last_value = None
+
+    def train(self, data):
+        # Simply store the last known value from the training set.
+        self.last_value = data["query_count"].iloc[-1]
+
+    def predict(self, data):
+        predictions = data.copy()
+        predictions["mean"] = self.last_value if self.last_value is not None else data["query_count"].iloc[-1]
+        return predictions
+
+class PatchTFT:
+    def __init__(self, prediction_duration):
+        self.prediction_duration = prediction_duration
+
+    def train(self, data):
+        # Placeholder: no training is performed.
+        pass
+
+    def predict(self, data):
+        predictions = data.copy()
+        # Dummy prediction: add 1 to the actual value.
+        predictions["mean"] = data["query_count"] + 1
+        return predictions
+
+class DeepSeq:
+    def __init__(self, prediction_duration):
+        self.prediction_duration = prediction_duration
+
+    def train(self, data):
+        # Placeholder: no training is performed.
+        pass
+
+    def predict(self, data):
+        predictions = data.copy()
+        # Dummy prediction: subtract 1 from the actual value.
+        predictions["mean"] = data["query_count"] - 1
+        return predictions
 
 def load_data(dataset_type, instance_number):
     """Load the dataset based on user input."""
@@ -58,13 +101,22 @@ def train_test_split():
     except Exception as e:
         return f"Error in train-test split: {str(e)}", ""
 
-def train_model(prediction_duration):
-    """Train the DeepAR model using the training split."""
+def train_model(prediction_duration, model_choice):
+    """Train the selected model using the training split."""
     global model
     if train1 is None:
         return "Load data and perform train-test split first!"
     try:
-        model = DeepAR(prediction_duration)
+        if model_choice == "DeepAR":
+            model = DeepAR(prediction_duration)
+        elif model_choice == "Seasonal Naive":
+            model = SeasonalNaive(prediction_duration)
+        elif model_choice == "PatchTFT":
+            model = PatchTFT(prediction_duration)
+        elif model_choice == "DeepSeq":
+            model = DeepSeq(prediction_duration)
+        else:
+            return f"Invalid model choice: {model_choice}"
         model.train(train1)
         return "Model trained successfully!"
     except Exception as e:
@@ -100,47 +152,110 @@ def visualize_predictions():
     except Exception as e:
         return f"Error visualizing predictions: {str(e)}", None
 
-# Creating the Gradio UI layout with tabs for a professional look
+# Creating the Gradio UI layout with a model selection step and tabs for the rest of the app
 with gr.Blocks() as app:
     gr.Markdown("# 📊 Workload Forecasting Gradio App 🚀")
     
-    with gr.Tabs():
+    # Model Selection Section (visible on startup)
+    with gr.Row():
+        with gr.Column():
+            model_selection = gr.Radio(
+                choices=["DeepAR", "Seasonal Naive", "PatchTFT", "DeepSeq"],
+                label="Select Model",
+                value="DeepAR"
+            )
+            confirm_btn = gr.Button("Confirm Model Selection")
+        with gr.Column():
+            model_description = gr.Markdown(
+                "**Model Description:** Please select a model to see its description."
+            )
+    
+    # A state to store the confirmed model selection.
+    selected_model = gr.State(value=None)
+    
+    # Tabs for the rest of the UI (hidden until a model is selected)
+    tabs = gr.Tabs(visible=False)
+    
+    # Function to update model description dynamically.
+    def update_model_description(model_choice):
+        if model_choice == "DeepAR":
+            return "**DeepAR:** Baseline model using the DeepAR method."
+        elif model_choice == "Seasonal Naive":
+            return "**Seasonal Naive:** Baseline model that leverages seasonal patterns."
+        elif model_choice == "PatchTFT":
+            return "**PatchTFT:** Baseline model implementing the PatchTFT algorithm."
+        elif model_choice == "DeepSeq":
+            return "**DeepSeq:** Our custom model built using TensorFlow."
+        else:
+            return ""
+    
+    # Update the model description when the selection changes.
+    model_selection.change(
+        update_model_description, 
+        inputs=[model_selection], 
+        outputs=[model_description]
+    )
+    
+    # When confirming the model selection, store the selected value and reveal the rest of the UI.
+    def confirm_model(model_choice):
+        return gr.update(visible=True), model_choice
+    
+    confirm_btn.click(
+        confirm_model, 
+        inputs=[model_selection], 
+        outputs=[tabs, selected_model]
+    )
+    
+    with tabs:
         # --- Data Tab ---
         with gr.TabItem("Data"):
             gr.Markdown("### Load and Visualize Data")
             with gr.Row():
-                dataset_type_input = gr.Radio(choices=["provisioned", "serverless"],
-                                              label="Dataset Type",
-                                              value="provisioned")
+                dataset_type_input = gr.Radio(
+                    choices=["provisioned", "serverless"],
+                    label="Dataset Type",
+                    value="provisioned"
+                )
                 instance_number_input = gr.Number(label="Instance Number", value=96)
             load_data_btn = gr.Button("Load Data")
             data_message = gr.Textbox(label="Load Data Message", interactive=False)
             data_preview = gr.Textbox(label="Data Preview", interactive=False)
-            load_data_btn.click(load_data,
-                                inputs=[dataset_type_input, instance_number_input],
-                                outputs=[data_message, data_preview])
+            load_data_btn.click(
+                load_data,
+                inputs=[dataset_type_input, instance_number_input],
+                outputs=[data_message, data_preview]
+            )
             
             visualize_data_btn = gr.Button("Visualize Data")
             viz_message = gr.Textbox(label="Visualization Message", interactive=False)
             data_viz = gr.Image(label="Data Visualization")
-            visualize_data_btn.click(visualize_data,
-                                     inputs=[],
-                                     outputs=[viz_message, data_viz])
+            visualize_data_btn.click(
+                visualize_data,
+                inputs=[],
+                outputs=[viz_message, data_viz]
+            )
         
         # --- Model Training Tab ---
         with gr.TabItem("Model Training"):
             gr.Markdown("### Train-Test Split and Model Training")
             train_split_btn = gr.Button("Perform Train-Test Split")
             split_message = gr.Textbox(label="Train-Test Split Result", interactive=False)
-            train_split_btn.click(train_test_split, inputs=[], outputs=[split_message, split_message])
+            train_split_btn.click(
+                train_test_split,
+                inputs=[],
+                outputs=[split_message, split_message]
+            )
             
             with gr.Row():
                 prediction_duration_input = gr.Number(label="Prediction Duration", value=7)
                 train_model_btn = gr.Button("Train Model")
             train_model_message = gr.Textbox(label="Model Training Status", interactive=False)
-            train_model_btn.click(train_model,
-                                  inputs=[prediction_duration_input],
-                                  outputs=train_model_message)
+            # Pass the prediction duration and the confirmed model selection state.
+            train_model_btn.click(
+                train_model,
+                inputs=[prediction_duration_input, selected_model],
+                outputs=train_model_message
+            )
         
         # --- Predictions Tab ---
         with gr.TabItem("Predictions"):
@@ -148,16 +263,20 @@ with gr.Blocks() as app:
             predict_btn = gr.Button("Make Predictions")
             predict_message = gr.Textbox(label="Prediction Message", interactive=False)
             prediction_output = gr.Textbox(label="Predictions", interactive=False)
-            predict_btn.click(predict,
-                              inputs=[],
-                              outputs=[predict_message, prediction_output])
+            predict_btn.click(
+                predict,
+                inputs=[],
+                outputs=[predict_message, prediction_output]
+            )
             
             visualize_pred_btn = gr.Button("Visualize Predictions")
             pred_viz_message = gr.Textbox(label="Prediction Visualization Message", interactive=False)
             pred_viz = gr.Image(label="Prediction Visualization")
-            visualize_pred_btn.click(visualize_predictions,
-                                     inputs=[],
-                                     outputs=[pred_viz_message, pred_viz])
+            visualize_pred_btn.click(
+                visualize_predictions,
+                inputs=[],
+                outputs=[pred_viz_message, pred_viz]
+            )
     
 if __name__ == "__main__":
     app.launch()
