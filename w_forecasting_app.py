@@ -5,7 +5,8 @@ from datetime import datetime
 import os
 import logging
 from utility.helpers import DataManager
-from utility.baseline_models import DeepAR  # Updated DeepAR implementation
+from utility.baseline_models import DeepAR
+from utility.baseline_models import SeasonalNaiveForecasting as SeasonalNaive  # Updated DeepAR implementation
 import matplotlib.pyplot as plt
 import seaborn as sns
 import io
@@ -23,21 +24,9 @@ datamanager = None
 train1, test1, train2, test2 = None, None, None, None
 model = None
 predictions = None
+instance_number_input=None
 
-# Placeholder implementations for additional models
-class SeasonalNaive:
-    def __init__(self, prediction_duration):
-        self.prediction_duration = prediction_duration
-        self.last_value = None
 
-    def train(self, data):
-        # Simply store the last known value from the training set.
-        self.last_value = data["query_count"].iloc[-1]
-
-    def predict(self, data):
-        predictions = data.copy()
-        predictions["mean"] = self.last_value if self.last_value is not None else data["query_count"].iloc[-1]
-        return predictions
 
 class PatchTFT:
     def __init__(self, prediction_duration):
@@ -139,7 +128,7 @@ def train_model(prediction_duration, model_choice):
             model.train(train1, target_column="query_count")
         elif model_choice == "Seasonal Naive":
             model = SeasonalNaive(prediction_duration)
-            model.train(train1)
+            model.train(train1,test1)
         elif model_choice == "PatchTFT":
             model = PatchTFT(prediction_duration)
             model.train(train1)
@@ -165,8 +154,8 @@ def predict():
             end_forecast = start_forecast + pd.Timedelta(hours=model.prediction_length - 1)
             test_forecast = test1[(test1["timestamp"] >= start_forecast) & (test1["timestamp"] <= end_forecast)]
             predictions = model.predict(test_forecast, target_column="query_count")
-        else:
-            predictions = model.predict(test1)
+        elif isinstance(model,SeasonalNaive):
+            predictions = model.train(train1,test1)
         return "Predictions generated successfully!", predictions.to_string()
     except Exception as e:
         return f"Error during prediction: {str(e)}", ""
@@ -182,6 +171,9 @@ def evaluate_model():
             end_forecast = start_forecast + pd.Timedelta(hours=model.prediction_length - 1)
             test_forecast = test1[(test1["timestamp"] >= start_forecast) & (test1["timestamp"] <= end_forecast)]
             evaluation_results = model.evaluate(test_forecast, target_column="query_count")
+            return "Evaluation successful!", str(evaluation_results)
+        elif isinstance(model, SeasonalNaive):
+            evaluation_results = model.evaluate_q_error(test1["query_count"].values,predictions["query_count"].values)
             return "Evaluation successful!", str(evaluation_results)
         else:
             return "Evaluation is implemented only for DeepAR in this demo.", ""
@@ -200,6 +192,9 @@ def visualize_predictions():
             end_forecast = start_forecast + pd.Timedelta(hours=model.prediction_length - 1)
             test_forecast = test1[(test1["timestamp"] >= start_forecast) & (test1["timestamp"] <= end_forecast)]
             sns.lineplot(x=test_forecast["timestamp"], y=test_forecast["query_count"], label="Actual")
+        elif isinstance(model, SeasonalNaive):
+            predictions.rename(columns={"query_count": "mean"}, inplace=True)
+            sns.lineplot(x=test1["timestamp"], y=test1["query_count"], label="Actual")
         else:
             sns.lineplot(x=test1["timestamp"], y=test1["query_count"], label="Actual")
         sns.lineplot(x=predictions["timestamp"], y=predictions["mean"], label="Predicted", linestyle="dashed")

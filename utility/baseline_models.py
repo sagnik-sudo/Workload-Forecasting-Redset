@@ -6,6 +6,7 @@ from autogluon.timeseries import TimeSeriesPredictor
 from typing import List, Dict
 from sklearn.metrics import mean_absolute_error, mean_absolute_percentage_error, mean_squared_error
 import matplotlib.pyplot as plt
+from utility.helpers import DataManager
 
 class DeepAR:
     """
@@ -246,27 +247,35 @@ class DeepAR:
 
 """Sesonal naive weekly forecasting method to get the simple baseline model"""
 
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+from sklearn.metrics import mean_absolute_error, mean_absolute_percentage_error
+from utility.helpers import DataManager  # Import DataManager from helpers.py
+
+
 class SeasonalNaiveForecasting:
-    def __init__(self, cluster_type, instance_id):
-        """Initialize with cluster type and instance ID."""
-        self.data_manager = DataManager(cluster_type, instance_id)  # Use DataManager from helpers.py
+    def __init__(self, prediction_length=24 * 7):
+        """Initialize the forecasting model with cluster type, instance ID, and prediction length."""
+        #self.data_manager = DataManager(cluster_type, instance_id)  # Use DataManager from helpers.py
         self.sorted_df = None
+        self.prediction_length = prediction_length  # Define prediction length dynamically
 
-    def process(self):
-        """Load and preprocess data using helper functions."""
-        self.sorted_df = self.data_manager.load_data()
-        self.sorted_df['query_count'] = np.log1p(self.sorted_df['query_count'])
-        self.sorted_df['timestamp'] = pd.to_datetime(data['timestamp'])
-        # Sort the data by timestamp
-        self.sorted_df = data.sort_values('timestamp')
-        return self.sorted_df
+    #def process(self):
+      #  """Load and preprocess data using DataManager."""
+      #  self.sorted_df = self.data_manager.load_data()
+      #  self.sorted_df["query_count"] = np.log1p(self.sorted_df["query_count"])  # Log transformation
+       # self.sorted_df["timestamp"] = pd.to_datetime(self.sorted_df["timestamp"])
+      #  self.sorted_df = self.sorted_df.sort_values("timestamp")  # Ensure sorted timestamps
+       # return self.sorted_df
 
-    def train_test_split_weekly(self):
-        """Perform rolling window cross-validation using helper functions."""
-        return self.data_manager.train_test_split()
+    # def train_test_split_weekly(self):
+    #     """Perform rolling window cross-validation using DataManager."""
+    #     return self.data_manager.train_test_split()
 
-    def seasonal_naive_forecast(self, train_df, test_df):
-        """Generate forecasts using a simple seasonal naive approach."""
+    def train(self, train_df, test_df):
+        """Generate forecasts using a simple seasonal naive approach and return a DataFrame."""
+        
         forecast_start = test_df["timestamp"].min()
         last_week_data = train_df.loc[
             train_df["timestamp"] >= (forecast_start - pd.Timedelta(days=7))
@@ -275,9 +284,17 @@ class SeasonalNaiveForecasting:
         if last_week_data.empty:
             raise ValueError("ERROR: Not enough past data to make seasonal naive predictions!")
 
-        last_week_values = last_week_data["query_count"].values[-len(test_df):]
-        forecast = pd.Series(last_week_values, index=test_df.index)
-        return forecast
+        last_week_values = last_week_data["query_count"].values[-self.prediction_length:]
+        forecast_timestamps = test_df["timestamp"][:self.prediction_length].values
+
+        # Creating a DataFrame instead of Series
+        forecast_df = pd.DataFrame({
+            "timestamp": forecast_timestamps,
+            "query_count": last_week_values
+        })
+
+        return forecast_df
+
 
     def evaluate_q_error(self, actuals, predicted):
         """Compute Q-error and additional evaluation metrics."""
@@ -297,17 +314,38 @@ class SeasonalNaiveForecasting:
         }
 
     def run(self):
-        """Run the entire forecasting pipeline"""
-        processed_df = self.process()
-        train_test_splits = self.data_manager.train_test_split(processed_df)
+        """Run the entire forecasting pipeline and visualize results."""
+       # processed_df = self.process()
+        train_test_splits = self.train_test_split_weekly()
 
         for i, (train_df, test_df) in enumerate(train_test_splits):
+            print(f"\n📅 Train Split {i+1}: {train_df['timestamp'].min()} → {train_df['timestamp'].max()}")
+            print(f"📅 Test Split {i+1}: {test_df['timestamp'].min()} → {test_df['timestamp'].max()}")
+
             forecast = self.seasonal_naive_forecast(train_df, test_df)
             results = self.evaluate_q_error(test_df["query_count"].values, forecast.values)
-            print(f" Evaluation Metrics for Split {i+1}: {results}")
+            print(f"📊 Evaluation Metrics for Split {i+1}: {results}")
+
+            # Plot Actual vs Predicted
+            plt.figure(figsize=(14, 7))
+            plt.plot(test_df["timestamp"], test_df["query_count"], label="Actual (Test Data)", color="black", linestyle="solid", marker="o")
+            plt.plot(test_df["timestamp"][:len(forecast)], forecast, label="Predicted (Seasonal Naive)", color="blue", linestyle="dashed", marker="x")
+
+            plt.axvline(x=test_df["timestamp"].min(), color="red", linestyle="dashed", label="Train-Test Split")
+            plt.xlabel("Time")
+            plt.ylabel("Query Count")
+            plt.legend()
+            plt.xticks(rotation=45)
+            plt.grid(True)
+            plt.title(f"Actual vs Predicted - Split {i+1}")
+            plt.show()
 
 
-# Run this to get Full Pipeline access for seasonal_naive
+# Run the Full Pipeline
 """if __name__ == "__main__":
-    model = SeasonalNaiveForecasting(cluster_type="provisioned", instance_id=96)
+    model = SeasonalNaiveForecasting( instance_id=96)
     model.run()"""
+
+
+
+
