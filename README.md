@@ -52,8 +52,12 @@ python -m w_forecasting_app.py
 Running on local URL:  http://127.0.0.1:7860
 
 
-## Miscelleanous
-### Swagger UI
+## Project Architecture
+![Project Architecture](./architecture.png)
 
 ## License
-This project is licensed under the GNU General Public License v3.0 - see the LICENSE file for details.
+This project is licensed under the **Internal Use License**.  
+
+See the [LICENSE](LICENSE) file for details.  
+    
+**Note:** This license is created by the repository maintainer and is not an official university license.
