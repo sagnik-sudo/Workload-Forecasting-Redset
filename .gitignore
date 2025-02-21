@@ -128,7 +128,9 @@ dmypy.json
 .pyre/
 
 # Parquet files
-*.parquet
+full_sl.parquet
+sorted.parquet
+full.parquet
 # Environment variable files
 .envrc
 .env.*
