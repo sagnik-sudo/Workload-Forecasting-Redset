@@ -22,7 +22,6 @@ class DataManager:
         self.instance_id = instance_id
         self.data = None
 
-
     def fill_timestamps(self):
         """Fills missing timestamps with zeros"""
         # Set the 'timestamp' as the index
@@ -47,9 +46,9 @@ class DataManager:
         self.data.reset_index(inplace=True)
         self.data.rename(columns={"index": "timestamp"}, inplace=True)
 
-        return
-    
-    def load_data(self):
+    def load_data(
+        self, start_date: pd.DataFrame = pd.to_datetime("2024-03-01 00:00:00")
+    ):
         """
         Loads the data into a dataframe for training and testing.
 
@@ -121,6 +120,9 @@ class DataManager:
         # convert timestamp to datetimeformat
         self.data.loc[:, "timestamp"] = pd.to_datetime(self.data["timestamp"])
 
+        # Exclude data before start_date
+        self.data = self.data[self.data['timestamp'] >= start_date]
+
         # sort
         self.data.sort_values(by="timestamp")
 
@@ -128,7 +130,6 @@ class DataManager:
         self.fill_timestamps()
 
         return self.data
-
 
     def train_test_split(self, data=None):
         """

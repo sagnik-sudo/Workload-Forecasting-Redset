@@ -136,3 +136,5 @@ dmypy.json
 .csv
 # AutoGluon
 autogluon*/
+lightning_logs/
+models/
