@@ -462,7 +462,7 @@ class RNNModel:
 
         return np.mean(val_losses), best_model
 
-    def predict_and_evaluate(self, model, X_test, y_test, test_df, target_col):
+    def evaluate_q_error(self, model, X_test, y_test, test_df, target_col):
         """
         Performs prediction and evaluates the model.
 
