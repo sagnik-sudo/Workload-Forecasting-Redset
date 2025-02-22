@@ -106,6 +106,9 @@ def train_model(prediction_duration, model_choice):
         return "Load data and perform train-test split first!"
     try:
         if model_choice == "DeepAR":
+            # Set prediction_length to match test1's length
+            prediction_duration = len(test1)
+
             # Hyperparameters dictionary as in the notebook
             hyperparameters = {
                 'DeepAR': {
@@ -122,43 +125,74 @@ def train_model(prediction_duration, model_choice):
                     'verbosity': 2
                 }
             }
-            # Instantiate DeepAR with forecast horizon and hyperparameters
+            # Instantiate DeepAR with modified prediction length
             model = DeepAR(prediction_length=prediction_duration, freq="h", hyperparameters=hyperparameters)
-            # Train using the target column "query_count"
             model.train(train1, target_column="query_count")
         elif model_choice == "Seasonal Naive":
             model = SeasonalNaive(prediction_duration)
-            model.train(train1,test1)
-        elif model_choice == "PatchTFT":
-            model = PatchTFT(prediction_duration)
-            model.train(train1)
-        elif model_choice == "DeepSeq":
-            model = DeepSeq(prediction_duration)
-            model.train(train1)
-        else:
-            return f"Invalid model choice: {model_choice}"
+            model.train(train1, test1)
         return "Model trained successfully!"
     except Exception as e:
         return f"Error training model: {str(e)}"
 
 def predict():
-    """Generate predictions using the trained model on the test split."""
+    """Generate predictions using the trained model strictly within the test range."""
     global predictions
     if test1 is None or model is None:
         return "Ensure data is loaded, train-test split is done, and model is trained first!", ""
     try:
         if isinstance(model, DeepAR):
-            # Determine forecast horizon from the last training timestamp
-            last_train_ts = train1["timestamp"].max()
-            start_forecast = last_train_ts + pd.Timedelta(hours=1)
-            end_forecast = start_forecast + pd.Timedelta(hours=model.prediction_length - 1)
-            test_forecast = test1[(test1["timestamp"] >= start_forecast) & (test1["timestamp"] <= end_forecast)]
+            # Predict strictly within the test1 range
+            test_forecast = test1.copy()
             predictions = model.predict(test_forecast, target_column="query_count")
-        elif isinstance(model,SeasonalNaive):
-            predictions = model.train(train1,test1)
+
+            # Align timestamps exactly with test set
+            predictions["timestamp"] = test_forecast["timestamp"].values
+        elif isinstance(model, SeasonalNaive):
+            predictions = model.train(train1, test1)
+
         return "Predictions generated successfully!", predictions.to_string()
     except Exception as e:
         return f"Error during prediction: {str(e)}", ""
+
+def visualize_predictions():
+    """Visualize actual vs predicted values."""
+    if data is None or predictions is None:
+        return "Ensure data is loaded and predictions are generated first!", None
+    try:
+        plt.figure(figsize=(10, 5))
+        
+        if isinstance(model, DeepAR):
+            # Ensure DeepAR predictions align strictly with the test set timestamps
+            test_forecast = test1.copy()
+            sns.lineplot(x=test_forecast["timestamp"], y=test_forecast["query_count"], label="Actual")
+            
+        elif isinstance(model, SeasonalNaive):
+            predictions.rename(columns={"query_count": "mean"}, inplace=True)
+            sns.lineplot(x=test1["timestamp"], y=test1["query_count"], label="Actual")
+
+        else:
+            sns.lineplot(x=test1["timestamp"], y=test1["query_count"], label="Actual")
+
+        # Overlay predicted values
+        sns.lineplot(x=predictions["timestamp"], y=predictions["mean"], label="Predicted", linestyle="dashed")
+
+        plt.xlabel("Timestamp")
+        plt.ylabel("Query Count")
+        plt.title("Prediction vs Actual (Aligned with Test Data)")
+        plt.legend()
+        plt.grid(True)
+
+        # Convert plot to image for Gradio
+        buf = io.BytesIO()
+        plt.savefig(buf, format="png", bbox_inches="tight")
+        plt.close()
+        buf.seek(0)
+        img = Image.open(buf)
+
+        return "Prediction visualization generated!", img
+    except Exception as e:
+        return f"Error visualizing predictions: {str(e)}", None
 
 def evaluate_model():
     """Evaluate the trained DeepAR model on the test forecast horizon."""
@@ -179,34 +213,6 @@ def evaluate_model():
             return "Evaluation is implemented only for DeepAR in this demo.", ""
     except Exception as e:
         return f"Error during evaluation: {str(e)}", ""
-
-def visualize_predictions():
-    """Visualize actual vs predicted values."""
-    if data is None or predictions is None:
-        return "Ensure data is loaded and predictions are generated first!", None
-    try:
-        plt.figure(figsize=(10, 5))
-        if isinstance(model, DeepAR):
-            last_train_ts = train1["timestamp"].max()
-            start_forecast = last_train_ts + pd.Timedelta(hours=1)
-            end_forecast = start_forecast + pd.Timedelta(hours=model.prediction_length - 1)
-            test_forecast = test1[(test1["timestamp"] >= start_forecast) & (test1["timestamp"] <= end_forecast)]
-            sns.lineplot(x=test_forecast["timestamp"], y=test_forecast["query_count"], label="Actual")
-        elif isinstance(model, SeasonalNaive):
-            predictions.rename(columns={"query_count": "mean"}, inplace=True)
-            sns.lineplot(x=test1["timestamp"], y=test1["query_count"], label="Actual")
-        else:
-            sns.lineplot(x=test1["timestamp"], y=test1["query_count"], label="Actual")
-        sns.lineplot(x=predictions["timestamp"], y=predictions["mean"], label="Predicted", linestyle="dashed")
-        plt.title("Prediction vs Actual")
-        buf = io.BytesIO()
-        plt.savefig(buf, format="png", bbox_inches="tight")
-        plt.close()
-        buf.seek(0)
-        img = Image.open(buf)
-        return "Prediction visualization generated!", img
-    except Exception as e:
-        return f"Error visualizing predictions: {str(e)}", None
 
 # Creating the Gradio UI layout with a model selection step and tabs for the rest of the app
 with gr.Blocks() as app:
