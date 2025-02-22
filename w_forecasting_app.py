@@ -7,6 +7,7 @@ import logging
 from utility.helpers import DataManager
 from utility.baseline_models import DeepAR
 from utility.baseline_models import SeasonalNaiveForecasting as SeasonalNaive  # Updated DeepAR implementation
+from utility.baseline_models import RNNModel as DeepSeq
 import matplotlib.pyplot as plt
 import seaborn as sns
 import io
@@ -40,20 +41,6 @@ class PatchTFT:
         predictions = data.copy()
         # Dummy prediction: add 1 to the actual value.
         predictions["mean"] = data["query_count"] + 1
-        return predictions
-
-class DeepSeq:
-    def __init__(self, prediction_duration):
-        self.prediction_duration = prediction_duration
-
-    def train(self, data):
-        # Placeholder: no training is performed.
-        pass
-
-    def predict(self, data):
-        predictions = data.copy()
-        # Dummy prediction: subtract 1 from the actual value.
-        predictions["mean"] = data["query_count"] - 1
         return predictions
 
 def load_data(dataset_type, instance_number):
@@ -108,7 +95,6 @@ def train_model(prediction_duration, model_choice):
         if model_choice == "DeepAR":
             # Set prediction_length to match test1's length
             prediction_duration = len(test1)
-
             # Hyperparameters dictionary as in the notebook
             hyperparameters = {
                 'DeepAR': {
@@ -125,12 +111,19 @@ def train_model(prediction_duration, model_choice):
                     'verbosity': 2
                 }
             }
-            # Instantiate DeepAR with modified prediction length
             model = DeepAR(prediction_length=prediction_duration, freq="h", hyperparameters=hyperparameters)
             model.train(train1, target_column="query_count")
         elif model_choice == "Seasonal Naive":
             model = SeasonalNaive(prediction_duration)
-            model.train(train1, test1)
+            model.train(train1,test1)
+        elif model_choice == "PatchTFT":
+            model = PatchTFT(prediction_duration)
+            model.train(train1)
+        elif model_choice == "DeepSeq":
+            model = DeepSeq(prediction_duration)
+            model.train(train1)
+        else:
+            return f"Invalid model choice: {model_choice}"
         return "Model trained successfully!"
     except Exception as e:
         return f"Error training model: {str(e)}"
@@ -142,57 +135,20 @@ def predict():
         return "Ensure data is loaded, train-test split is done, and model is trained first!", ""
     try:
         if isinstance(model, DeepAR):
-            # Predict strictly within the test1 range
             test_forecast = test1.copy()
             predictions = model.predict(test_forecast, target_column="query_count")
 
             # Align timestamps exactly with test set
             predictions["timestamp"] = test_forecast["timestamp"].values
-        elif isinstance(model, SeasonalNaive):
+        elif isinstance(model,SeasonalNaive):
             predictions = model.train(train1, test1)
+        elif isinstance(model, DeepSeq):
+            print(test1.shape)
+            predictions = model.prediction(test1) 
 
         return "Predictions generated successfully!", predictions.to_string()
     except Exception as e:
         return f"Error during prediction: {str(e)}", ""
-
-def visualize_predictions():
-    """Visualize actual vs predicted values."""
-    if data is None or predictions is None:
-        return "Ensure data is loaded and predictions are generated first!", None
-    try:
-        plt.figure(figsize=(10, 5))
-        
-        if isinstance(model, DeepAR):
-            # Ensure DeepAR predictions align strictly with the test set timestamps
-            test_forecast = test1.copy()
-            sns.lineplot(x=test_forecast["timestamp"], y=test_forecast["query_count"], label="Actual")
-            
-        elif isinstance(model, SeasonalNaive):
-            predictions.rename(columns={"query_count": "mean"}, inplace=True)
-            sns.lineplot(x=test1["timestamp"], y=test1["query_count"], label="Actual")
-
-        else:
-            sns.lineplot(x=test1["timestamp"], y=test1["query_count"], label="Actual")
-
-        # Overlay predicted values
-        sns.lineplot(x=predictions["timestamp"], y=predictions["mean"], label="Predicted", linestyle="dashed")
-
-        plt.xlabel("Timestamp")
-        plt.ylabel("Query Count")
-        plt.title("Prediction vs Actual (Aligned with Test Data)")
-        plt.legend()
-        plt.grid(True)
-
-        # Convert plot to image for Gradio
-        buf = io.BytesIO()
-        plt.savefig(buf, format="png", bbox_inches="tight")
-        plt.close()
-        buf.seek(0)
-        img = Image.open(buf)
-
-        return "Prediction visualization generated!", img
-    except Exception as e:
-        return f"Error visualizing predictions: {str(e)}", None
 
 def evaluate_model():
     """Evaluate the trained DeepAR model on the test forecast horizon."""
@@ -209,10 +165,49 @@ def evaluate_model():
         elif isinstance(model, SeasonalNaive):
             evaluation_results = model.evaluate_q_error(test1["query_count"].values,predictions["query_count"].values)
             return "Evaluation successful!", str(evaluation_results)
+        elif isinstance(model, DeepSeq):
+            print(f"test_size: {test1.shape} predicted_size : {predictions.shape}")
+            evaluation_results = model.evaluate_q_error(test1["query_count"].values, predictions["query_count"].values)
+            
+            return "Evaluation successful!", str(evaluation_results)
         else:
             return "Evaluation is implemented only for DeepAR in this demo.", ""
     except Exception as e:
         return f"Error during evaluation: {str(e)}", ""
+
+def visualize_predictions():
+    """Visualize actual vs predicted values."""
+    if data is None or predictions is None:
+        return "Ensure data is loaded and predictions are generated first!", None
+    
+    try:
+        plt.figure(figsize=(10, 5))
+        if isinstance(model, DeepAR):
+            test_forecast = test1.copy()
+            sns.lineplot(x=test_forecast["timestamp"], y=test_forecast["query_count"], label="Actual")
+        elif isinstance(model, SeasonalNaive):
+            predictions.rename(columns={"query_count": "mean"}, inplace=True)
+            sns.lineplot(x=test1["timestamp"], y=test1["query_count"], label="Actual")
+        elif isinstance(model, DeepSeq):
+            predictions.rename(columns={"query_count": "mean"}, inplace=True)
+            sns.lineplot(x=test1["timestamp"], y=test1["query_count"], label="Actual")
+        else:
+            sns.lineplot(x=test1["timestamp"], y=test1["query_count"], label="Actual")
+        sns.lineplot(x=predictions["timestamp"], y=predictions["mean"], label="Predicted", linestyle="dashed")
+        plt.xlabel("Timestamp")
+        plt.ylabel("Query Count")
+        plt.title("Prediction vs Actual (Aligned with Test Data)")
+        plt.legend()
+        plt.grid(True)
+        # Convert plot to image for Gradio
+        buf = io.BytesIO()
+        plt.savefig(buf, format="png", bbox_inches="tight")
+        plt.close()
+        buf.seek(0)
+        img = Image.open(buf)
+        return "Prediction visualization generated!", img
+    except Exception as e:
+        return f"Error visualizing predictions: {str(e)}", None
 
 # Creating the Gradio UI layout with a model selection step and tabs for the rest of the app
 with gr.Blocks() as app:

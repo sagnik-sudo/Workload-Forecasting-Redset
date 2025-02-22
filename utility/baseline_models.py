@@ -319,32 +319,191 @@ class SeasonalNaiveForecasting:
         train_test_splits = self.train_test_split_weekly()
 
         for i, (train_df, test_df) in enumerate(train_test_splits):
-            print(f"\n📅 Train Split {i+1}: {train_df['timestamp'].min()} → {train_df['timestamp'].max()}")
-            print(f"📅 Test Split {i+1}: {test_df['timestamp'].min()} → {test_df['timestamp'].max()}")
+            print(f"\n Train Split {i+1}: {train_df['timestamp'].min()} → {train_df['timestamp'].max()}")
+            print(f" Test Split {i+1}: {test_df['timestamp'].min()} → {test_df['timestamp'].max()}")
 
             forecast = self.seasonal_naive_forecast(train_df, test_df)
             results = self.evaluate_q_error(test_df["query_count"].values, forecast.values)
-            print(f"📊 Evaluation Metrics for Split {i+1}: {results}")
-
-            # Plot Actual vs Predicted
-            plt.figure(figsize=(14, 7))
-            plt.plot(test_df["timestamp"], test_df["query_count"], label="Actual (Test Data)", color="black", linestyle="solid", marker="o")
-            plt.plot(test_df["timestamp"][:len(forecast)], forecast, label="Predicted (Seasonal Naive)", color="blue", linestyle="dashed", marker="x")
-
-            plt.axvline(x=test_df["timestamp"].min(), color="red", linestyle="dashed", label="Train-Test Split")
-            plt.xlabel("Time")
-            plt.ylabel("Query Count")
-            plt.legend()
-            plt.xticks(rotation=45)
-            plt.grid(True)
-            plt.title(f"Actual vs Predicted - Split {i+1}")
-            plt.show()
+            print(f" Evaluation Metrics for Split {i+1}: {results}")
 
 
 # Run the Full Pipeline
 """if __name__ == "__main__":
     model = SeasonalNaiveForecasting( instance_id=96)
     model.run()"""
+
+"""RNN forecasting method to get the comparable deep model"""
+
+import numpy as np
+import tensorflow as tf
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import LSTM, Dense, Dropout
+from tensorflow.keras.optimizers import Adam
+from tensorflow.keras.callbacks import EarlyStopping
+import keras_tuner as kt
+from sklearn.preprocessing import MinMaxScaler
+from sklearn.metrics import mean_absolute_error, mean_squared_error
+from sklearn.model_selection import TimeSeriesSplit
+
+
+# **Set Seed for Reproducibility**
+SEED = 42
+np.random.seed(SEED)
+tf.random.set_seed(SEED)
+
+
+class RNNModel:
+    """
+    LSTM-based forecasting model with Bayesian Optimization and evaluation.
+    Compatible with the existing application code.
+    """
+
+    def __init__(self, prediction_length):
+        """Initialize the LSTM model with sequence length and scaler."""
+        self.sequence_length = 24  # Default input sequence length
+        self.prediction_length = prediction_length  # Number of future steps to predict
+        self.model = None
+        self.scaler = MinMaxScaler(feature_range=(0, 1))  # Scaling for normalization
+
+    def build_model(self, hp):
+        """Builds an LSTM model with tunable hyperparameters."""
+        model = Sequential()
+        model.add(LSTM(hp.Int('units_1', 32, 256, 32), return_sequences=True, input_shape=(self.sequence_length, 1)))
+        model.add(LSTM(hp.Int('units_2', 32, 256, 32), return_sequences=False))
+        model.add(Dense(hp.Int('dense_units', 16, 128, 16), activation='relu'))
+        model.add(Dropout(hp.Float('dropout_rate', 0.1, 0.5, 0.1)))
+        model.add(Dense(1))  # Predict one step ahead
+
+        model.compile(
+            optimizer=Adam(hp.Float('learning_rate', 1e-4, 1e-2, sampling='LOG')),
+            loss='mean_squared_error'
+        )
+        return model
+
+    def train(self, train1):
+        """
+        Trains the LSTM model using train1 dataset.
+        Expects `train1` DataFrame with 'query_count' column.
+        """
+        train1 = train1.copy()
+        train1["query_count"] = np.log1p(train1["query_count"])  # Log transformation
+        self.scaler.fit(train1[["query_count"]])  # Fit scaler on training data
+        train_scaled = self.scaler.transform(train1[["query_count"]])
+
+        # Generate sequences
+        X_train, y_train = self._create_sequences(train_scaled)
+
+        # Ensure enough data for validation
+        val_size = int(len(X_train) * 0.2) if len(X_train) > 10 else 0
+        X_val, y_val = (X_train[-val_size:], y_train[-val_size:]) if val_size else (None, None)
+        X_train, y_train = (X_train[:-val_size], y_train[:-val_size]) if val_size else (X_train, y_train)
+
+        # **Hyperparameter Tuning**
+        tuner = kt.BayesianOptimization(
+            self.build_model,
+            objective="val_loss",
+            max_trials=5,
+            directory="tuner_results",
+            project_name="lstm_cv"
+        )
+
+        if X_val is not None:
+            tuner.search(X_train, y_train, epochs=10, validation_data=(X_val, y_val), verbose=1)
+        else:
+            tuner.search(X_train, y_train, epochs=10, verbose=1)  # Skip validation if data is small
+
+        best_hp = tuner.get_best_hyperparameters(num_trials=1)
+        if not best_hp:
+            raise ValueError("Hyperparameter tuning failed. No valid trials found.")
+
+        best_model = tuner.hypermodel.build(best_hp[0])
+        early_stop = EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True)
+
+        best_model.fit(
+            X_train, y_train,
+            epochs=20, batch_size=64,
+            validation_data=(X_val, y_val) if X_val is not None else None,
+            verbose=1,
+            callbacks=[early_stop]
+        )
+
+        self.model = best_model
+        best_model.save("tuner_results/lstm_cv/best_model.h5")
+        return " Model trained successfully!"
+
+    def _create_sequences(self, data):
+        """
+        Converts time-series data into sequences for LSTM training.
+        :param data: Scaled time-series data as a NumPy array
+        :return: Sequences of input (X) and output (y) for training
+        """
+        X, y = [], []
+        for i in range(len(data) - self.sequence_length):
+            X.append(data[i:i + self.sequence_length])
+            y.append(data[i + self.sequence_length])
+        return np.array(X), np.array(y)
+
+    def prediction(self, test1):
+        """
+        Generates predictions for the test dataset.
+        Ensures predictions match the test date range and length.
+        
+        :param test1: DataFrame containing timestamps and 'query_count'
+        :return: DataFrame with predicted values aligned with test set timestamps.
+        """
+        if self.model is None:
+            raise ValueError("❌ Model is not trained. Train the model before predicting.")
+
+        test1 = test1.copy()
+        test1["query_count"] = np.log1p(test1["query_count"])  # Apply log transformation
+        test_scaled = self.scaler.transform(test1[["query_count"]])
+
+        # ✅ Ensure the correct number of predictions
+        last_seq = test_scaled[-self.sequence_length:].reshape(1, self.sequence_length, 1)  # Get the last input sequence
+        predictions = []
+
+        # ✅ Predict step by step to get exactly `self.prediction_length`
+        for _ in range(self.prediction_length):
+            next_pred = self.model.predict(last_seq)[0][0]  # Predict next step
+            predictions.append(next_pred)  # Store prediction
+
+            # Update sequence: Remove first value, add predicted value
+            last_seq = np.roll(last_seq, -1, axis=1)
+            last_seq[0, -1, 0] = next_pred  
+
+        # ✅ Convert predictions back to original scale
+        predictions = self.scaler.inverse_transform(np.array(predictions).reshape(-1, 1)).flatten()
+
+        # ✅ Align timestamps: Use exact `self.prediction_length` range
+        start_forecast = test1["timestamp"].min()
+        forecast_timestamps = pd.date_range(start=start_forecast, periods=self.prediction_length, freq="H")
+
+        # ✅ Create DataFrame with correct timestamps
+        test_df = pd.DataFrame({
+            "timestamp": forecast_timestamps,
+            "query_count": predictions
+        })
+
+        print(f"✅ Predictions generated successfully with {len(test_df)} timestamps (Aligned with test set)!")
+        return test_df
+
+
+    def evaluate_q_error(self, actuals, predicted):
+        """
+        Computes evaluation metrics including Q-error.
+        :param actuals: Actual query counts
+        :param predicted: Predicted query counts
+        :return: Dictionary of error metrics
+        """
+        mae = mean_absolute_error(actuals, predicted)
+        rmse = np.sqrt(mean_squared_error(actuals, predicted))
+        epsilon = 1e-10
+        q_errors = np.maximum(predicted / (actuals + epsilon), actuals / (predicted + epsilon))
+        return {
+            "MAE": mae,
+            "RMSE": rmse,
+            "Q-Error Mean": np.mean(q_errors)}
+
 
 
 
