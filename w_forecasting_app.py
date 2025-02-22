@@ -49,8 +49,8 @@ def load_data(dataset_type, instance_number):
     try:
         datamanager = DataManager(dataset_type, instance_number)
         data = datamanager.load_data()
-        #data["timestamp"] = pd.to_datetime(data["timestamp"])
-        #data = data.sort_values("timestamp")
+        data["timestamp"] = pd.to_datetime(data["timestamp"])
+        data = data.sort_values("timestamp")
         # Apply log transform to query_count
         data["query_count"] = np.log1p(data["query_count"])
         return "Data loaded successfully!", data.head().to_string()

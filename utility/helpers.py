@@ -21,42 +21,14 @@ class DataManager:
         self.instance_id = instance_id
         self.data = None
 
-    def fill_timestamps(self):
-        """Fills missing timestamps with zeros"""
-        # Set the 'timestamp' as the index
-        self.data.set_index("timestamp", inplace=True)
-
-        # Create a complete range of timestamps
-        full_range = pd.date_range(
-            start=pd.to_datetime("2024-03-01 00:00:00"),
-            end=pd.to_datetime("2024-05-29 23:00:00"),
-            freq="1h",
-        )
-
-        # Reindex the DataFrame with the complete timestamp range
-        self.data = self.data.reindex(pd.DatetimeIndex(full_range))
-
-        # Set the fill values for missing timestamps
-        self.data["instance_id"] = self.data["instance_id"].fillna(
-            self.instance_id
-        )
-        # For remaining columns, fill with 0
-        self.data.fillna(0, inplace=True)
-
-        # Reset the index to get 'timestamp' back as a column
-        self.data.reset_index(inplace=True)
-        self.data.rename(columns={"index": "timestamp"}, inplace=True)
-
-    def load_data(
-        self, start_date: pd.DataFrame = pd.to_datetime("2024-03-01 00:00:00")
-    ):
+    def load_data(self):
         """
         Loads the data into a dataframe for training and testing.
 
         Returns:
             pd.DataFrame: A dataframe with columns:
                 - instance_id: id of the instance
-                - timestamp: hourly timestamp in the format 'YYYY-MM-DD HH-MM-SS'
+                - timestamp: hourly timestamp in the format 'YYYY-MM-DD HH'
                 - query_count: total number of queries in that hour
                 - runtime: combined execution time of all queries in that hour
                 - bytes_scanned: total amount of Gigabytes scanned in that hour
@@ -117,19 +89,6 @@ class DataManager:
 
         # Filter the dataframe to only include rows with the specified instance_id
         self.data = df[df["instance_id"] == self.instance_id]
-
-        # convert timestamp to datetimeformat
-        self.data.loc[:, "timestamp"] = pd.to_datetime(self.data["timestamp"])
-
-        # Exclude data before start_date
-        self.data = self.data[self.data["timestamp"] >= start_date]
-
-        # sort
-        self.data.sort_values(by="timestamp")
-
-        # fill in missing timestamps
-        self.fill_timestamps()
-
         return self.data
 
     def train_test_split(self, data=None):
@@ -162,10 +121,10 @@ class DataManager:
         if not pd.api.types.is_datetime64_any_dtype(data["timestamp"]):
             data["timestamp"] = pd.to_datetime(data["timestamp"])
 
-        # reset the latest timestamp to 1 hour before midnight. This ensures that
-        # only full days are included
-        latest_date = data["timestamp"].max().normalize() - timedelta(hours=1)
-        data = data[data["timestamp"] <= latest_date]
+        # reset the latest timestamp to midnight. This ensures that
+        # only full days are included<s
+        latest_date = data["timestamp"].max().normalize()
+        data = data[data["timestamp"] < latest_date]
 
         # Create a new column 'week' representing the week period (using ISO week)
         data["week"] = data["timestamp"].dt.to_period("W")
