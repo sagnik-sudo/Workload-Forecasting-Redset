@@ -8,6 +8,7 @@ from utility.helpers import DataManager
 from utility.baseline_models import DeepAR
 from utility.baseline_models import SeasonalNaiveForecasting as SeasonalNaive  # Updated DeepAR implementation
 from utility.baseline_models import RNNModel as DeepSeq
+from utility.baseline_models import PatchTST  # <-- New import for PatchTST
 import matplotlib.pyplot as plt
 import seaborn as sns
 import io
@@ -25,23 +26,7 @@ datamanager = None
 train1, test1, train2, test2 = None, None, None, None
 model = None
 predictions = None
-instance_number_input=None
-
-
-
-class PatchTFT:
-    def __init__(self, prediction_duration):
-        self.prediction_duration = prediction_duration
-
-    def train(self, data):
-        # Placeholder: no training is performed.
-        pass
-
-    def predict(self, data):
-        predictions = data.copy()
-        # Dummy prediction: add 1 to the actual value.
-        predictions["mean"] = data["query_count"] + 1
-        return predictions
+instance_number_input = None
 
 def load_data(dataset_type, instance_number):
     """Load the dataset based on user input."""
@@ -95,7 +80,6 @@ def train_model(prediction_duration, model_choice):
         if model_choice == "DeepAR":
             # Set prediction_length to match test1's length
             prediction_duration = len(test1)
-            # Hyperparameters dictionary as in the notebook
             hyperparameters = {
                 'DeepAR': {
                     'num_layers': 2,
@@ -115,10 +99,10 @@ def train_model(prediction_duration, model_choice):
             model.train(train1, target_column="query_count")
         elif model_choice == "Seasonal Naive":
             model = SeasonalNaive(prediction_duration)
-            model.train(train1,test1)
-        elif model_choice == "PatchTFT":
-            model = PatchTFT(prediction_duration)
-            model.train(train1)
+            model.train(train1, test1)
+        elif model_choice == "PatchTST":
+            model = PatchTST(prediction_length=prediction_duration, freq="h")
+            model.train(train1, target_column="query_count")
         elif model_choice == "DeepSeq":
             model = DeepSeq(sequence_length=24) 
             X_train, y_train, _, _ = model.prepare_data(train1, test1, "query_count")
@@ -139,11 +123,11 @@ def predict():
         if isinstance(model, DeepAR):
             test_forecast = test1.copy()
             predictions = model.predict(test_forecast, target_column="query_count")
-
-            # Align timestamps exactly with test set
             predictions["timestamp"] = test_forecast["timestamp"].values
-        elif isinstance(model,SeasonalNaive):
+        elif isinstance(model, SeasonalNaive):
             predictions = model.train(train1, test1)
+        elif isinstance(model, PatchTST):
+            predictions = model.predict(test1, target_column="query_count")
         elif isinstance(model, DeepSeq):
             _, _, X_test, y_test = model.prepare_data(train1, test1, "query_count")
 
@@ -166,7 +150,7 @@ def predict():
         return f"Error during prediction: {str(e)}", ""
 
 def evaluate_model():
-    """Evaluate the trained DeepAR model on the test forecast horizon."""
+    """Evaluate the trained model on the test forecast horizon."""
     if test1 is None or model is None:
         return "Ensure data is loaded, train-test split is done, and model is trained first!", ""
     try:
@@ -178,7 +162,7 @@ def evaluate_model():
             evaluation_results = model.evaluate(test_forecast, target_column="query_count")
             return "Evaluation successful!", str(evaluation_results)
         elif isinstance(model, SeasonalNaive):
-            evaluation_results = model.evaluate_q_error(test1["query_count"].values,predictions["query_count"].values)
+            evaluation_results = model.evaluate_q_error(test1["query_count"].values, predictions["query_count"].values)
             return "Evaluation successful!", str(evaluation_results)
         elif isinstance(model, DeepSeq):
             print(f"test_size: {test1.shape} predicted_size : {predictions.shape}")
@@ -189,7 +173,7 @@ def evaluate_model():
             
             return "Evaluation successful!", str(evaluation_results)
         else:
-            return "Evaluation is implemented only for DeepAR in this demo.", ""
+            return "Evaluation is implemented only for supported models in this demo.", ""
     except Exception as e:
         return f"Error during evaluation: {str(e)}", ""
 
@@ -197,7 +181,6 @@ def visualize_predictions():
     """Visualize actual vs predicted values."""
     if data is None or predictions is None:
         return "Ensure data is loaded and predictions are generated first!", None
-    
     try:
         plt.figure(figsize=(10, 5))
         if isinstance(model, DeepAR):
@@ -209,6 +192,8 @@ def visualize_predictions():
         elif isinstance(model, DeepSeq):
             predictions.rename(columns={"query_count": "mean"}, inplace=True)
             sns.lineplot(x=test1["timestamp"], y=test1["query_count"], label="Actual")
+        elif isinstance(model, PatchTST):
+            sns.lineplot(x=test1["timestamp"], y=test1["query_count"], label="Actual")
         else:
             sns.lineplot(x=test1["timestamp"], y=test1["query_count"], label="Actual")
         sns.lineplot(x=predictions["timestamp"], y=predictions["mean"], label="Predicted", linestyle="dashed")
@@ -217,7 +202,6 @@ def visualize_predictions():
         plt.title("Prediction vs Actual (Aligned with Test Data)")
         plt.legend()
         plt.grid(True)
-        # Convert plot to image for Gradio
         buf = io.BytesIO()
         plt.savefig(buf, format="png", bbox_inches="tight")
         plt.close()
@@ -235,7 +219,7 @@ with gr.Blocks() as app:
     with gr.Row():
         with gr.Column():
             model_selection = gr.Radio(
-                choices=["DeepAR", "Seasonal Naive", "PatchTFT", "DeepSeq"],
+                choices=["DeepAR", "Seasonal Naive", "PatchTST", "DeepSeq"],  # Updated option here
                 label="Select Model",
                 value="DeepAR"
             )
@@ -257,8 +241,8 @@ with gr.Blocks() as app:
             return "**DeepAR:** Baseline model using AutoGluon DeepAR with forecast horizon and evaluation."
         elif model_choice == "Seasonal Naive":
             return "**Seasonal Naive:** Baseline model that leverages seasonal patterns."
-        elif model_choice == "PatchTFT":
-            return "**PatchTFT:** Baseline model implementing the PatchTFT algorithm."
+        elif model_choice == "PatchTST":
+            return "**PatchTST:** Baseline model implementing the PatchTST algorithm for time series forecasting."
         elif model_choice == "DeepSeq":
             return "**DeepSeq:** Our custom model built using TensorFlow."
         else:

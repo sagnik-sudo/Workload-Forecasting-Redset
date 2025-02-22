@@ -503,6 +503,115 @@ class RNNModel:
 
 
 
+import pandas as pd
+import numpy as np
+import os
+import logging
+from typing import Dict, List
+from autogluon.timeseries import TimeSeriesPredictor
+from utility.helpers import DataManager
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+class PatchTST:
+    """
+    PatchTST implementation for time series forecasting using AutoGluon.
+    """
+    
+    def __init__(self, prediction_length: int, freq: str = "h", hyperparameters: Dict = None):
+        print("Initializing PatchTST Model...")
+        self.prediction_length = prediction_length
+        self.freq = freq
+        self.model = None
+        
+        default_patchtst_hp = {
+            "num_layers": 3,
+            "hidden_size": 128,
+            "dropout_rate": 0.2,
+            "learning_rate": 5e-4,
+            "context_length": prediction_length * 2,
+            "batch_size": 16,
+            "max_epochs": 50,
+            "patience": 5,
+        }
+        self.hyperparameters = hyperparameters or {"PatchTST": default_patchtst_hp}
+    
+    def prepare_data(self, data: pd.DataFrame, target_column: str = "query_count") -> pd.DataFrame:
+        """
+        Prepares data for PatchTST model by formatting it in AutoGluon's long format.
+        """
+        data = data.copy()
+        data["timestamp"] = pd.to_datetime(data["timestamp"])
+        data = data.sort_values("timestamp")
+        data["item_id"] = "item_1"
+        return data[["item_id", "timestamp", target_column]]
+
+    def train(self, train_data: pd.DataFrame, target_column: str = "query_count"):
+        """
+        Trains the PatchTST model.
+        """
+        prepared_data = self.prepare_data(train_data, target_column)
+        
+        print("Training PatchTST...")
+        self.model = TimeSeriesPredictor(
+            target=target_column,
+            prediction_length=self.prediction_length,
+            freq=self.freq,
+            eval_metric='SMAPE'
+        )
+        
+        self.model.fit(train_data=prepared_data, hyperparameters=self.hyperparameters)
+        print("PatchTST Training Completed.")
+    
+    def predict(self, test_data: pd.DataFrame, target_column: str = "query_count") -> pd.DataFrame:
+        """
+        Generates predictions strictly within test timestamps.
+        """
+        if self.model is None:
+            raise ValueError("Model must be trained before making predictions.")
+        
+        prepared_data = self.prepare_data(test_data, target_column)
+        predictions = self.model.predict(prepared_data)
+        
+        forecast = predictions.loc["item_1"].reset_index().rename(columns={"index": "timestamp"})
+        mean_forecast = forecast["0.5"] if "0.5" in forecast.columns else forecast.iloc[:, 1]
+        
+        predictions_df = pd.DataFrame({
+            "timestamp": test_data["timestamp"].values,
+            "mean": mean_forecast[:len(test_data)]
+        })
+        
+        return predictions_df
+    
+    def evaluate(self, test_data: pd.DataFrame, target_column: str = "query_count") -> Dict[str, float]:
+        """
+        Evaluates PatchTST predictions against actual test data.
+        """
+        if self.model is None:
+            raise ValueError("Model must be trained before evaluation.")
+        
+        predictions_df = self.predict(test_data, target_column)
+        actual = test_data[target_column].values
+        forecast = predictions_df["mean"].values[:len(actual)]
+        
+        mae = np.mean(np.abs(forecast - actual))
+        q_errors = np.maximum(forecast / (actual + 1e-10), actual / (forecast + 1e-10))
+        q_error = np.mean(q_errors)
+        rme = np.mean(np.abs(forecast - actual) / (np.abs(actual) + 1e-10))
+        
+        return {"q_error": q_error, "mae": mae, "rme": rme}
+    
+    def save_model(self):
+        if self.model is None:
+            raise ValueError("No trained model to save.")
+        self.model.save()
+        print("Model saved successfully.")
+    
+    def load_model(self, path: str):
+        if not os.path.exists(path):
+            raise FileNotFoundError(f"No model file found at {path}")
+        self.model = TimeSeriesPredictor.load(path)
+        print(f"Model loaded from {path}.")
 
 
 
