@@ -120,8 +120,10 @@ def train_model(prediction_duration, model_choice):
             model = PatchTFT(prediction_duration)
             model.train(train1)
         elif model_choice == "DeepSeq":
-            model = DeepSeq(prediction_duration)
-            model.train(train1)
+            model = DeepSeq(sequence_length=24) 
+            X_train, y_train, _, _ = model.prepare_data(train1, test1, "query_count")
+            _, best_model = model.cross_validate(X_train, y_train)
+            model.model = best_model# Store best model
         else:
             return f"Invalid model choice: {model_choice}"
         return "Model trained successfully!"
@@ -143,8 +145,21 @@ def predict():
         elif isinstance(model,SeasonalNaive):
             predictions = model.train(train1, test1)
         elif isinstance(model, DeepSeq):
-            print(test1.shape)
-            predictions = model.prediction(test1) 
+            _, _, X_test, y_test = model.prepare_data(train1, test1, "query_count")
+
+            # Make Predictions
+            predictions = model.model.predict(X_test)
+
+            # Convert predictions back to original scale
+            predictions = model.scaler.inverse_transform(predictions).flatten()
+            #y_test_actual = model.scaler.inverse_transform(y_test.reshape(-1, 1)).flatten()
+
+            # Convert to DataFrame for consistency
+            predictions_df = pd.DataFrame({
+                "timestamp": test1["timestamp"][:len(predictions)].values,
+                "query_count": predictions
+            })
+            predictions = predictions_df
 
         return "Predictions generated successfully!", predictions.to_string()
     except Exception as e:
@@ -167,7 +182,10 @@ def evaluate_model():
             return "Evaluation successful!", str(evaluation_results)
         elif isinstance(model, DeepSeq):
             print(f"test_size: {test1.shape} predicted_size : {predictions.shape}")
-            evaluation_results = model.evaluate_q_error(test1["query_count"].values, predictions["query_count"].values)
+            evaluation_results = model.evaluate_q_error(
+                test1["query_count"].values,
+                predictions["query_count"].values
+            )
             
             return "Evaluation successful!", str(evaluation_results)
         else:
