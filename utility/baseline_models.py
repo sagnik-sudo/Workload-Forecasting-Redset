@@ -3,8 +3,7 @@ import numpy as np
 import os
 from typing import Dict, List
 from autogluon.timeseries import TimeSeriesPredictor
-from sklearn.metrics import mean_absolute_error, mean_absolute_percentage_error, mean_squared_error
-import matplotlib.pyplot as plt
+from sklearn.metrics import mean_absolute_error, mean_squared_error
 from utility.helpers import DataManager
 
 
@@ -302,6 +301,10 @@ import keras_tuner as kt
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.metrics import mean_absolute_error, mean_squared_error
 
+SEED = 42
+np.random.seed(SEED)
+tf.random.set_seed(SEED)
+
 class RNNModel:
     """
     Recurrent Neural Network (RNN) model using LSTM for time series forecasting.
@@ -315,6 +318,7 @@ class RNNModel:
             sequence_length (int): Length of the input sequence.
         """
         self.sequence_length = sequence_length
+
         self.model = None
         self.scaler = MinMaxScaler(feature_range=(0, 1))
 
@@ -406,29 +410,32 @@ class RNNModel:
 
         return np.mean(val_losses), best_model
 
-    def evaluate_q_error(self, model, X_test, y_test, test_df, target_col):
+    def evaluate_q_error(self, y_actual, y_predicted):
         """
         Evaluate the trained LSTM model using MAE, RMSE, and Q-error metrics.
         Also prints key performance indicators.
         """
-        predictions = model.predict(X_test)
-        predictions = self.scaler.inverse_transform(predictions).flatten()
-        y_test_actual = self.scaler.inverse_transform(y_test.reshape(-1, 1)).flatten()
+        # Basic metrics
+        mae = mean_absolute_error(y_actual, y_predicted)
+        rmse = np.sqrt(mean_squared_error(y_actual, y_predicted))
 
-        mae = mean_absolute_error(y_test_actual, predictions)
-        rmse = np.sqrt(mean_squared_error(y_test_actual, predictions))
-
+        # Q-error
         epsilon = 1e-10
-        q_errors = np.maximum(predictions / (y_test_actual + epsilon), y_test_actual / (predictions + epsilon))
+        q_errors = np.maximum(
+            y_predicted / (y_actual + epsilon),
+            y_actual / (y_predicted + epsilon)
+        )
         q_error_mean = np.mean(q_errors)
         q_error_median = np.median(q_errors)
         q_error_90 = np.percentile(q_errors, 90)
 
-        print(
-            f"🔹 MAE: {mae:.4f} | RMSE: {rmse:.4f} | Q-Error Mean: {q_error_mean:.4f} "
-            f"| Q-Error Median: {q_error_median:.4f} | Q-Error 90th Percentile: {q_error_90:.4f}"
-        )
-        return mae, rmse, q_error_mean
+        return {
+            "MAE": mae,
+            "RMSE": rmse,
+            "Q-Error Mean": q_error_mean,
+            "Q-Error Median": q_error_median,
+            "Q-Error 90th": q_error_90
+        }
 
 
 ###############################################################################

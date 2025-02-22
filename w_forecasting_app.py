@@ -168,7 +168,7 @@ def predict():
             predictions = model.model.predict(X_test)
             predictions = model.scaler.inverse_transform(predictions).flatten()
             predictions_df = pd.DataFrame({
-                "timestamp": test1["timestamp"][:len(predictions)].values,
+                "timestamp": test1["timestamp"].iloc[model.sequence_length:].values,
                 "query_count": predictions
             })
             predictions = predictions_df
@@ -197,10 +197,16 @@ def evaluate_model():
             return "Evaluation successful!", str(evaluation_results)
         elif isinstance(model, NeuroCast):
             print(f"test_size: {test1.shape} predicted_size : {predictions.shape}")
-            evaluation_results = model.evaluate_q_error(
-                test1["query_count"].values,
-                predictions["query_count"].values
-            )
+            y_actual = test1["query_count"].iloc[model.sequence_length:].values
+            y_predicted = predictions["query_count"].values
+            evaluation_results = model.evaluate_q_error(y_actual, y_predicted)
+            return "Evaluation successful!", str(evaluation_results)
+        elif isinstance(model, PatchTST):
+            last_train_ts = train1["timestamp"].max()
+            start_forecast = last_train_ts + pd.Timedelta(hours=1)
+            end_forecast = start_forecast + pd.Timedelta(hours=model.prediction_length - 1)
+            test_forecast = test1[(test1["timestamp"] >= start_forecast) & (test1["timestamp"] <= end_forecast)]
+            evaluation_results = model.evaluate(test_forecast, target_column="query_count")
             return "Evaluation successful!", str(evaluation_results)
         else:
             return "Evaluation is implemented only for supported models in this demo.", ""
