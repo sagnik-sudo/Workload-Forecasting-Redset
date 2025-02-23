@@ -454,14 +454,13 @@ class PatchTST:
         self.model = None
 
         default_patchtst_hp = {
-            "num_layers": Int(2, 5),
-            "hidden_size": Int(64, 256),
-            "dropout_rate": Real(0.0, 0.5),
-            "learning_rate": Real(1e-4, 1e-2, log=True),
-            "context_length": 48,
-            "batch_size": Categorical(16, 32),
-            "max_epochs": Int(30, 100),
-            "patience": Int(3, 10),
+            "num_encoder_layers ": 2,
+            "d_model": 128,
+            "lr": 5e-4,
+            "context_length": prediction_length * 2,
+            "batch_size": 16,
+            "max_epochs": 50,
+            "weight_decay": 1e-8,
         }
         self.hyperparameters = {
                 "PatchTST": {
