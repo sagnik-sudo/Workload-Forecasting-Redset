@@ -5,7 +5,8 @@ from typing import Dict, List
 from autogluon.timeseries import TimeSeriesPredictor
 from sklearn.metrics import mean_absolute_error, mean_squared_error
 from utility.helpers import DataManager
-
+from autogluon.common.space import Int, Real, Categorical
+import autogluon.common.space as space
 
 class DeepAR:
     """
@@ -21,18 +22,21 @@ class DeepAR:
         self.freq = freq
         self.model = None
 
-        # Default hyperparameters for the DeepAR model.
-        default_deepar_hp = {
-            "epochs": 50,
-            "learning_rate": 1e-3,
-            "num_layers": 2,
-            "hidden_size": 40,
-            "dropout_rate": 0.1,
-            "batch_size": 32,
-            "context_length": prediction_length,
-        }
         # Force usage of DeepAR by setting hyperparameters under the "DeepAR" key.
-        self.hyperparameters = hyperparameters or {"DeepAR": default_deepar_hp}
+        self.hyperparameters = {
+                "DeepAR": {
+                    "num_encoder_layers": Int(2, 3),
+                    "d_model": Int(64, 256),
+                    "dropout_rate": Real(0.0, 0.5),
+                    "lr": Real(1e-4, 1e-2, log=True),
+                    "context_length": 168,
+                    "batch_size": Categorical(16, 32),
+                    "max_epochs": Int(30, 100),
+                    "weight_decay": Int(1e-8, 0),
+                    "hidden_size": space.Int(20, 100),
+                    "dropout_rate": space.Categorical(0.1, 0.3),
+                },
+            }
 
     def prepare_data(self, data: pd.DataFrame, target_column: str = "query_count") -> pd.DataFrame:
         """
@@ -61,10 +65,11 @@ class DeepAR:
             freq=self.freq,
             eval_metric='SMAPE'
         )
-        # Fit the predictor using the specified DeepAR hyperparameters.
         self.model.fit(
             train_data=prepared_data,
             hyperparameters=self.hyperparameters,
+            hyperparameter_tune_kwargs="auto",
+            enable_ensemble=False,
         )
         print("Training completed using DeepAR.")
 
@@ -456,16 +461,17 @@ class PatchTST:
         self.freq = freq
         self.model = None
 
-        default_patchtst_hp = {
-            "num_encoder_layers ": 2,
-            "d_model": 128,
-            "lr": 5e-4,
-            "context_length": prediction_length * 2,
-            "batch_size": 16,
-            "max_epochs": 50,
-            "weight_decay": 1e-8,
+        self.hyperparameters = {"PatchTST": {
+            "num_encoder_layers": Int(2, 5),
+            "d_model": Int(64, 256),
+            "dropout_rate": Real(0.0, 0.5),
+            "lr": Real(1e-4, 1e-2, log=True),
+            "context_length": 48,
+            "batch_size": Categorical(16, 32),
+            "max_epochs": Int(30, 100),
+            "weight_decay": Int(1e-8, 0),
         }
-        self.hyperparameters = hyperparameters or {"PatchTST": default_patchtst_hp}
+}
 
     def prepare_data(self, data: pd.DataFrame, target_column: str = "query_count") -> pd.DataFrame:
         """
@@ -489,7 +495,12 @@ class PatchTST:
             freq=self.freq,
             eval_metric='SMAPE'
         )
-        self.model.fit(train_data=prepared_data, hyperparameters=self.hyperparameters)
+        self.model.fit(
+            train_data=prepared_data,
+            hyperparameters=self.hyperparameters,
+            hyperparameter_tune_kwargs="auto",
+            enable_ensemble=False,
+        )
         print("PatchTST Training Completed.")
 
     def predict(self, test_data: pd.DataFrame, target_column: str = "query_count") -> pd.DataFrame:
