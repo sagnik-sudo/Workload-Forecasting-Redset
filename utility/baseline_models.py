@@ -22,18 +22,13 @@ class DeepAR:
         self.freq = freq
         self.model = None
 
-        # Default hyperparameters search space for the DeepAR model.
-        default_deepar_hp = {
-            "epochs": Int(20, 80),  # Search between 20 and 80 epochs
-            "learning_rate": Real(1e-4, 1e-2, log=True),  # Log scale search between 1e-4 and 1e-2
-            "num_layers": Int(1, 3),  # Search between 1 and 3 layers
-            "hidden_size": Int(20, 100),  # Search between 20 and 100 units
-            "dropout_rate": Real(0.0, 0.5),  # Search between 0 and 0.5 dropout rate
-            "batch_size": Categorical(16, 32, 64),  # Choose from these batch sizes
-            "context_length": prediction_length,  # Remains fixed
-        }
         # Force usage of DeepAR by setting hyperparameters under the "DeepAR" key.
-        self.hyperparameters = hyperparameters or {"DeepAR": default_deepar_hp}
+        self.hyperparameters = {
+                "DeepAR": {
+                    "hidden_size": space.Int(20, 100),
+                    "dropout_rate": space.Categorical(0.1, 0.3),
+                },
+            }
 
     def prepare_data(self, data: pd.DataFrame, target_column: str = "query_count") -> pd.DataFrame:
         """
@@ -64,12 +59,7 @@ class DeepAR:
         )
         self.model.fit(
             train_data=prepared_data,
-            hyperparameters={
-                "DeepAR": {
-                    "hidden_size": space.Int(20, 100),
-                    "dropout_rate": space.Categorical(0.1, 0.3),
-                },
-            },
+            hyperparameters=self.hyperparameters,
             hyperparameter_tune_kwargs="auto",
             enable_ensemble=False,
         )
@@ -473,7 +463,12 @@ class PatchTST:
             "max_epochs": Int(30, 100),
             "patience": Int(3, 10),
         }
-        self.hyperparameters = hyperparameters or {"PatchTST": default_patchtst_hp}
+        self.hyperparameters = {
+                "PatchTST": {
+                    "hidden_size": space.Int(20, 100),
+                    "dropout_rate": space.Categorical(0.1, 0.3),
+                },
+            }
 
     def prepare_data(self, data: pd.DataFrame, target_column: str = "query_count") -> pd.DataFrame:
         """
@@ -497,7 +492,12 @@ class PatchTST:
             freq=self.freq,
             eval_metric='SMAPE'
         )
-        self.model.fit(train_data=prepared_data, hyperparameter_tune_kwargs="auto")
+        self.model.fit(
+            train_data=prepared_data,
+            hyperparameters=self.hyperparameters,
+            hyperparameter_tune_kwargs="auto",
+            enable_ensemble=False,
+        )
         print("PatchTST Training Completed.")
 
     def predict(self, test_data: pd.DataFrame, target_column: str = "query_count") -> pd.DataFrame:
