@@ -14,7 +14,9 @@ class DeepAR:
     It supports training, prediction, evaluation, and saving/loading models.
     """
 
-    def __init__(self, prediction_length: int, freq: str = "h", hyperparameters: Dict = None):
+    def __init__(
+        self, prediction_length: int, freq: str = "h", hyperparameters: Dict = None
+    ):
         # Initialization of model parameters.
         print("Initializing DeepARAutogluonTS Model...")
         self.prediction_length = prediction_length
@@ -34,7 +36,9 @@ class DeepAR:
         # Force usage of DeepAR by setting hyperparameters under the "DeepAR" key.
         self.hyperparameters = hyperparameters or {"DeepAR": default_deepar_hp}
 
-    def prepare_data(self, data: pd.DataFrame, target_column: str = "query_count") -> pd.DataFrame:
+    def prepare_data(
+        self, data: pd.DataFrame, target_column: str = "query_count"
+    ) -> pd.DataFrame:
         """
         Convert a pandas DataFrame into the long format expected by AutoGluon TimeSeries.
         The input DataFrame must include a 'timestamp' column and a target column.
@@ -59,7 +63,7 @@ class DeepAR:
             target=target_column,
             prediction_length=self.prediction_length,
             freq=self.freq,
-            eval_metric='SMAPE'
+            eval_metric="SMAPE",
         )
         # Fit the predictor using the specified DeepAR hyperparameters.
         self.model.fit(
@@ -68,7 +72,9 @@ class DeepAR:
         )
         print("Training completed using DeepAR.")
 
-    def predict(self, test_data: pd.DataFrame, target_column: str = "query_count") -> pd.DataFrame:
+    def predict(
+        self, test_data: pd.DataFrame, target_column: str = "query_count"
+    ) -> pd.DataFrame:
         """
         Generate predictions using the trained DeepAR model.
         Returns a DataFrame with timestamps and forecast statistics.
@@ -86,17 +92,23 @@ class DeepAR:
         # Use appropriate quantile columns if available.
         lower_bound = forecast["0.1"] if "0.1" in forecast.columns else None
         upper_bound = forecast["0.9"] if "0.9" in forecast.columns else None
-        mean_forecast = forecast["0.5"] if "0.5" in forecast.columns else forecast.iloc[:, 1]  # fallback option
+        mean_forecast = (
+            forecast["0.5"] if "0.5" in forecast.columns else forecast.iloc[:, 1]
+        )  # fallback option
 
-        predictions_df = pd.DataFrame({
-            "timestamp": forecast["timestamp"],
-            "mean": mean_forecast,
-            "lower_bound": lower_bound,
-            "upper_bound": upper_bound,
-        })
+        predictions_df = pd.DataFrame(
+            {
+                "timestamp": forecast["timestamp"],
+                "mean": mean_forecast,
+                "lower_bound": lower_bound,
+                "upper_bound": upper_bound,
+            }
+        )
         return predictions_df
 
-    def evaluate(self, test_data: pd.DataFrame, target_column: str = "query_count") -> Dict[str, float]:
+    def evaluate(
+        self, test_data: pd.DataFrame, target_column: str = "query_count"
+    ) -> Dict[str, float]:
         """
         Evaluate the DeepAR model using custom metrics such as Q-error, MAE, and RME.
         Actual values for evaluation are assumed to be the last `prediction_length` rows of the test data.
@@ -116,7 +128,9 @@ class DeepAR:
             raise ValueError("Not enough test data to cover the forecast horizon.")
 
         # Assume last `prediction_length` rows as actual values for forecast horizon.
-        actual_forecast = prepared_data.iloc[-self.prediction_length:].reset_index(drop=True)
+        actual_forecast = prepared_data.iloc[-self.prediction_length :].reset_index(
+            drop=True
+        )
 
         if len(actual_forecast) != len(predictions_df):
             raise ValueError("Mismatch between forecast length and actuals length.")
@@ -124,17 +138,15 @@ class DeepAR:
         forecast = predictions_df["mean"].values
         actual = actual_forecast[target_column].values
 
-
         mae = mean_absolute_error(actual, forecast)
-        q_errors = np.maximum((np.maximum(forecast,1) / np.maximum(actual,1)) , (np.maximum(actual ,1)/ np.maximum(forecast,1)))
+        q_errors = np.maximum(
+            (np.maximum(forecast, 1) / np.maximum(actual, 1)),
+            (np.maximum(actual, 1) / np.maximum(forecast, 1)),
+        )
         q_error = np.mean(q_errors)
         rme = np.sqrt(mean_squared_error(actual, forecast))
 
-        metrics = {
-            "q_error": q_error,
-            "mae": mae,
-            "rme": rme
-        }
+        metrics = {"q_error": q_error, "mae": mae, "rme": rme}
         print("Evaluation Metrics:")
         print(f"Q-error: {q_error:.4f}")
         print(f"MAE: {mae:.4f}")
@@ -165,7 +177,7 @@ class DeepAR:
         target_column: str = "query_count",
         hyperparams_list: List[Dict] = None,
         num_val_windows: int = 3,
-        eval_metric: str = "WQL"
+        eval_metric: str = "WQL",
     ):
         """
         Train the DeepAR model with multiple hyperparameter configurations using rolling-window cross-validation.
@@ -179,7 +191,7 @@ class DeepAR:
                     "num_layers": 2,
                     "hidden_size": 40,
                     "dropout_rate": 0.1,
-                    "batch_size": 32
+                    "batch_size": 32,
                 }
             ]
 
@@ -194,23 +206,26 @@ class DeepAR:
             target=target_column,
             prediction_length=self.prediction_length,
             freq=self.freq,
-            eval_metric=eval_metric
+            eval_metric=eval_metric,
         )
         # Perform cross-validation tuning.
         predictor.fit(
             train_data=prepared_data,
             hyperparameters=hyperparams,
             num_val_windows=num_val_windows,
-            verbosity=2
+            verbosity=2,
         )
         # Store the best predictor.
         self.model = predictor
-        print("Cross-validation and hyperparameter tuning complete. Best model stored in self.model.")
+        print(
+            "Cross-validation and hyperparameter tuning complete. Best model stored in self.model."
+        )
 
 
 ###############################################################################
 # Seasonal Naive Forecasting Class
 ###############################################################################
+
 
 class SeasonalNaiveForecasting:
     """
@@ -235,17 +250,20 @@ class SeasonalNaiveForecasting:
             train_df["timestamp"] >= (forecast_start - pd.Timedelta(days=7))
         ]
         if last_week_data.empty:
-            raise ValueError("ERROR: Not enough past data to make seasonal naive predictions!")
+            raise ValueError(
+                "ERROR: Not enough past data to make seasonal naive predictions!"
+            )
 
         # Use the last `prediction_length` values from the extracted week.
-        last_week_values = last_week_data[target_column].values[-self.prediction_length:]
-        forecast_timestamps = test_df["timestamp"][:self.prediction_length].values
+        last_week_values = last_week_data[target_column].values[
+            -self.prediction_length :
+        ]
+        forecast_timestamps = test_df["timestamp"][: self.prediction_length].values
 
         # Create a DataFrame with the forecasted values.
-        forecast_df = pd.DataFrame({
-            "timestamp": forecast_timestamps,
-            target_column: last_week_values
-        })
+        forecast_df = pd.DataFrame(
+            {"timestamp": forecast_timestamps, target_column: last_week_values}
+        )
         return forecast_df
 
     def evaluate_q_error(self, actuals, predicted):
@@ -255,17 +273,18 @@ class SeasonalNaiveForecasting:
         epsilon = 1e-10
         print(actuals)
         print(predicted)
-        q_errors = np.maximum((np.maximum(predicted,1) / np.maximum(actuals,1)) , (np.maximum(actuals ,1)/ np.maximum(predicted,1)))
-    
+        q_errors = np.maximum(
+            (np.maximum(predicted, 1) / np.maximum(actuals, 1)),
+            (np.maximum(actuals, 1) / np.maximum(predicted, 1)),
+        )
+
         q_error_mean = np.mean(q_errors)
 
         mae = mean_absolute_error(actuals, predicted)
         rmse = np.sqrt(mean_squared_error(actuals, predicted))
 
-        return {
-            "MAE": mae,
-            "RMSE": rmse,
-            "Q_error": q_error_mean}
+        return {"MAE": mae, "RMSE": rmse, "Q_error": q_error_mean}
+
 
 ###############################################################################
 # RNN Time Series Forecasting Model using LSTM
@@ -283,6 +302,7 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error
 SEED = 42
 np.random.seed(SEED)
 tf.random.set_seed(SEED)
+
 
 class RNNModel:
     """
@@ -377,13 +397,16 @@ class RNNModel:
             best_hp = tuner.get_best_hyperparameters(num_trials=1)[0]
             best_model = tuner.hypermodel.build(best_hp)
 
-            early_stop = EarlyStopping(monitor="val_loss", patience=10, restore_best_weights=True)
+            early_stop = EarlyStopping(
+                monitor="val_loss", patience=10, restore_best_weights=True
+            )
             best_model.fit(
-                X_t, y_t,
+                X_t,
+                y_t,
                 epochs=50,
                 batch_size=16,
                 validation_data=(X_val, y_val),
-                callbacks=[early_stop]
+                callbacks=[early_stop],
             )
             val_losses.append(min(best_model.history.history["val_loss"]))
 
@@ -401,16 +424,12 @@ class RNNModel:
         # Q-error
         epsilon = 1e-10
         q_errors = np.maximum(
-            (np.maximum(y_predicted,1) / np.maximum(y_actual,1)),
-            (np.maximum(y_actual,1) / np.maximum(y_predicted,1) )
+            (np.maximum(y_predicted, 1) / np.maximum(y_actual, 1)),
+            (np.maximum(y_actual, 1) / np.maximum(y_predicted, 1)),
         )
         q_error_mean = np.mean(q_errors)
 
-        return {
-            "MAE": mae,
-            "RMSE": rmse,
-            "Q-Error Mean": q_error_mean
-        }
+        return {"MAE": mae, "RMSE": rmse, "Q-Error": q_error_mean}
 
 
 ###############################################################################
@@ -420,12 +439,15 @@ class RNNModel:
 import seaborn as sns
 import logging
 
+
 class PatchTST:
     """
     PatchTST implementation for time series forecasting using AutoGluon.
     """
 
-    def __init__(self, prediction_length: int, freq: str = "h", hyperparameters: Dict = None):
+    def __init__(
+        self, prediction_length: int, freq: str = "h", hyperparameters: Dict = None
+    ):
         print("Initializing PatchTST Model...")
         self.prediction_length = prediction_length
         self.freq = freq
@@ -443,7 +465,9 @@ class PatchTST:
         }
         self.hyperparameters = hyperparameters or {"PatchTST": default_patchtst_hp}
 
-    def prepare_data(self, data: pd.DataFrame, target_column: str = "query_count") -> pd.DataFrame:
+    def prepare_data(
+        self, data: pd.DataFrame, target_column: str = "query_count"
+    ) -> pd.DataFrame:
         """
         Prepare the input DataFrame in the long format required by AutoGluon TimeSeries.
         """
@@ -463,12 +487,14 @@ class PatchTST:
             target=target_column,
             prediction_length=self.prediction_length,
             freq=self.freq,
-            eval_metric='SMAPE'
+            eval_metric="SMAPE",
         )
         self.model.fit(train_data=prepared_data, hyperparameters=self.hyperparameters)
         print("PatchTST Training Completed.")
 
-    def predict(self, test_data: pd.DataFrame, target_column: str = "query_count") -> pd.DataFrame:
+    def predict(
+        self, test_data: pd.DataFrame, target_column: str = "query_count"
+    ) -> pd.DataFrame:
         """
         Generate predictions using the trained PatchTST model.
         Matches predictions strictly to the provided test timestamps.
@@ -479,16 +505,26 @@ class PatchTST:
         prepared_data = self.prepare_data(test_data, target_column)
         predictions = self.model.predict(prepared_data)
 
-        forecast = predictions.loc["item_1"].reset_index().rename(columns={"index": "timestamp"})
-        mean_forecast = forecast["0.5"] if "0.5" in forecast.columns else forecast.iloc[:, 1]
+        forecast = (
+            predictions.loc["item_1"]
+            .reset_index()
+            .rename(columns={"index": "timestamp"})
+        )
+        mean_forecast = (
+            forecast["0.5"] if "0.5" in forecast.columns else forecast.iloc[:, 1]
+        )
 
-        predictions_df = pd.DataFrame({
-            "timestamp": test_data["timestamp"].values,
-            "mean": mean_forecast[:len(test_data)]
-        })
+        predictions_df = pd.DataFrame(
+            {
+                "timestamp": test_data["timestamp"].values,
+                "mean": mean_forecast[: len(test_data)],
+            }
+        )
         return predictions_df
 
-    def evaluate(self, test_data: pd.DataFrame, target_column: str = "query_count") -> Dict[str, float]:
+    def evaluate(
+        self, test_data: pd.DataFrame, target_column: str = "query_count"
+    ) -> Dict[str, float]:
         """
         Evaluate the PatchTST model by comparing predictions against actual target values.
         Computes metrics such as MAE, Q-error, and RME.
@@ -498,14 +534,17 @@ class PatchTST:
 
         predictions_df = self.predict(test_data, target_column)
         actual = test_data[target_column].values
-        forecast = predictions_df["mean"].values[:len(actual)]
+        forecast = predictions_df["mean"].values[: len(actual)]
 
         mae = mean_absolute_error(actual, forecast)
-        q_errors = np.maximum((np.maximum(forecast,1) / np.maximum(actual,1)) , (np.maximum(actual ,1)/ np.maximum(forecast,1)))
+        q_errors = np.maximum(
+            (np.maximum(forecast, 1) / np.maximum(actual, 1)),
+            (np.maximum(actual, 1) / np.maximum(forecast, 1)),
+        )
         q_error = np.mean(q_errors)
         rme = np.sqrt(mean_squared_error(actual, forecast))
 
-        return {"q_error": q_error, "mae": mae, "rme": rme}
+        return {"Q_Error": q_error, "MAE": mae, "RME": rme}
 
     def save_model(self):
         """

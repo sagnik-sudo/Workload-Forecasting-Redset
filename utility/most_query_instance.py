@@ -1,9 +1,11 @@
 import pandas as pd
 
+
 class TopClustersFinder:
     """
     Load query data, identify top clusters based on total query count, and manage output.
     """
+
     def __init__(self, file_path, top_n=5):
         """
         Initialize the TopClustersFinder.
@@ -75,6 +77,7 @@ class TopClustersFinder:
         top_clusters = self.find_top_clusters()
         print("\nTop Clusters:\n", top_clusters)
         return top_clusters
+
 
 if __name__ == "__main__":
     finder = TopClustersFinder("provisioned.parquet")
