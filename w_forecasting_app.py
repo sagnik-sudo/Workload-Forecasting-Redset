@@ -13,10 +13,10 @@ from datetime import datetime
 import os
 import logging
 from utility.helpers import DataManager
-from utility.baseline_models import DeepAR
-from utility.baseline_models import SeasonalNaiveForecasting as SeasonalNaive
-from utility.baseline_models import RNNModel as NeuroCast
-from utility.baseline_models import PatchTST
+from utility.models import DeepAR
+from utility.models import SeasonalNaiveForecasting as SeasonalNaive
+from utility.models import RNNModel as NeuroCast
+from utility.models import PatchTST
 import matplotlib.pyplot as plt
 import seaborn as sns
 import io
@@ -35,6 +35,7 @@ train1, test1, train2, test2 = None, None, None, None
 model = None
 predictions = None
 instance_number_input = None
+target_column = None
 
 def load_data(dataset_type, instance_number):
     """Load the dataset based on user input.
@@ -46,14 +47,14 @@ def load_data(dataset_type, instance_number):
     Returns:
         tuple: A success message and a preview of the loaded data as a string.
     """
-    global data, datamanager
+    global data, datamanager,target_column
     try:
         datamanager = DataManager(dataset_type, instance_number)
         data = datamanager.load_data()
         data["timestamp"] = pd.to_datetime(data["timestamp"])
         data = data.sort_values("timestamp")
         # Apply log transformation to query_count.
-        data["query_count"] = np.log1p(data["query_count"])
+        data[target_column] = np.log1p(data[target_column])
         return "Data loaded successfully!", data.head().to_string()
     except Exception as e:
         return f"Error loading data: {str(e)}", ""
@@ -64,11 +65,12 @@ def visualize_data():
     Returns:
         tuple: A message and a PIL image of the visualization.
     """
+    global target_column
     if data is None:
         return "Load data first!", None
     try:
         plt.figure(figsize=(10, 5))
-        sns.lineplot(x=data["timestamp"], y=data["query_count"])
+        sns.lineplot(x=data["timestamp"], y=data[target_column])
         plt.title("Data Visualization")
         buf = io.BytesIO()
         plt.savefig(buf, format="png", bbox_inches="tight")
@@ -85,7 +87,7 @@ def train_test_split():
     Returns:
         tuple: A message summarizing the split results.
     """
-    global train1, test1, train2, test2
+    global train1, test1, train2, test2, target_column
     if data is None:
         return "Load data first!", ""
     try:
@@ -105,7 +107,7 @@ def train_model(prediction_duration, model_choice):
     Returns:
         str: Result message indicating success or failure of training.
     """
-    global model
+    global model, target_column
     if train1 is None:
         return "Load data and perform train-test split first!"
     try:
@@ -127,16 +129,16 @@ def train_model(prediction_duration, model_choice):
                 }
             }
             model = DeepAR(prediction_length=prediction_duration, freq="h", hyperparameters=hyperparameters)
-            model.train(train1, target_column="query_count")
+            model.train(train1, target_column)
         elif model_choice == "Seasonal Naive":
             model = SeasonalNaive(prediction_duration)
-            model.train(train1, test1)
+            model.train(train1, test1, target_column)
         elif model_choice == "PatchTST":
             model = PatchTST(prediction_length=prediction_duration, freq="h")
-            model.train(train1, target_column="query_count")
+            model.train(train1, target_column)
         elif model_choice == "NeuroCast":
             model = NeuroCast(sequence_length=24) 
-            X_train, y_train, _, _ = model.prepare_data(train1, test1, "query_count")
+            X_train, y_train, _, _ = model.prepare_data(train1, test1, target_column)
             _, best_model = model.cross_validate(X_train, y_train)
             model.model = best_model  # Store best model.
         else:
@@ -151,25 +153,25 @@ def predict():
     Returns:
         tuple: A message and the predictions output as a string.
     """
-    global predictions
+    global predictions, target_column
     if test1 is None or model is None:
         return "Ensure data is loaded, train-test split is done, and model is trained first!", ""
     try:
         if isinstance(model, DeepAR):
             test_forecast = test1.copy()
-            predictions = model.predict(test_forecast, target_column="query_count")
+            predictions = model.predict(test_forecast, target_column)
             predictions["timestamp"] = test_forecast["timestamp"].values
         elif isinstance(model, SeasonalNaive):
-            predictions = model.train(train1, test1)
+            predictions = model.train(train1, test1, target_column)
         elif isinstance(model, PatchTST):
-            predictions = model.predict(test1, target_column="query_count")
+            predictions = model.predict(test1, target_column)
         elif isinstance(model, NeuroCast):
-            _, _, X_test, y_test = model.prepare_data(train1, test1, "query_count")
+            _, _, X_test, y_test = model.prepare_data(train1, test1, target_column)
             predictions = model.model.predict(X_test)
             predictions = model.scaler.inverse_transform(predictions).flatten()
             predictions_df = pd.DataFrame({
                 "timestamp": test1["timestamp"].iloc[model.sequence_length:].values,
-                "query_count": predictions
+                target_column: predictions
             })
             predictions = predictions_df
         return "Predictions generated successfully!", predictions.to_string()
@@ -182,6 +184,7 @@ def evaluate_model():
     Returns:
         tuple: A message and evaluation metrics as a string.
     """
+    global target_column
     if test1 is None or model is None:
         return "Ensure data is loaded, train-test split is done, and model is trained first!", ""
     try:
@@ -190,15 +193,15 @@ def evaluate_model():
             start_forecast = last_train_ts + pd.Timedelta(hours=1)
             end_forecast = start_forecast + pd.Timedelta(hours=model.prediction_length - 1)
             test_forecast = test1[(test1["timestamp"] >= start_forecast) & (test1["timestamp"] <= end_forecast)]
-            evaluation_results = model.evaluate(test_forecast, target_column="query_count")
+            evaluation_results = model.evaluate(test_forecast, target_column)
             return "Evaluation successful!", str(evaluation_results)
         elif isinstance(model, SeasonalNaive):
-            evaluation_results = model.evaluate_q_error(test1["query_count"].values, predictions["query_count"].values)
+            evaluation_results = model.evaluate_q_error(test1[target_column], predictions[target_column].values)
             return "Evaluation successful!", str(evaluation_results)
         elif isinstance(model, NeuroCast):
             print(f"test_size: {test1.shape} predicted_size : {predictions.shape}")
-            y_actual = test1["query_count"].iloc[model.sequence_length:].values
-            y_predicted = predictions["query_count"].values
+            y_actual = test1[target_column].iloc[model.sequence_length:].values
+            y_predicted = predictions[target_column].values
             evaluation_results = model.evaluate_q_error(y_actual, y_predicted)
             return "Evaluation successful!", str(evaluation_results)
         elif isinstance(model, PatchTST):
@@ -206,7 +209,7 @@ def evaluate_model():
             start_forecast = last_train_ts + pd.Timedelta(hours=1)
             end_forecast = start_forecast + pd.Timedelta(hours=model.prediction_length - 1)
             test_forecast = test1[(test1["timestamp"] >= start_forecast) & (test1["timestamp"] <= end_forecast)]
-            evaluation_results = model.evaluate(test_forecast, target_column="query_count")
+            evaluation_results = model.evaluate(test_forecast, target_column)
             return "Evaluation successful!", str(evaluation_results)
         else:
             return "Evaluation is implemented only for supported models in this demo.", ""
@@ -219,23 +222,24 @@ def visualize_predictions():
     Returns:
         tuple: A message and a PIL image of the prediction vs actual plot.
     """
+    global target_column
     if data is None or predictions is None:
         return "Ensure data is loaded and predictions are generated first!", None
     try:
         plt.figure(figsize=(10, 5))
         if isinstance(model, DeepAR):
             test_forecast = test1.copy()
-            sns.lineplot(x=test_forecast["timestamp"], y=test_forecast["query_count"], label="Actual")
+            sns.lineplot(x=test_forecast["timestamp"], y=test_forecast[target_column], label="Actual")
         elif isinstance(model, SeasonalNaive):
-            predictions.rename(columns={"query_count": "mean"}, inplace=True)
-            sns.lineplot(x=test1["timestamp"], y=test1["query_count"], label="Actual")
+            predictions.rename(columns={target_column: "mean"}, inplace=True)
+            sns.lineplot(x=test1["timestamp"], y=test1[target_column], label="Actual")
         elif isinstance(model, NeuroCast):
-            predictions.rename(columns={"query_count": "mean"}, inplace=True)
-            sns.lineplot(x=test1["timestamp"], y=test1["query_count"], label="Actual")
+            predictions.rename(columns={target_column: "mean"}, inplace=True)
+            sns.lineplot(x=test1["timestamp"], y=test1[target_column], label="Actual")
         elif isinstance(model, PatchTST):
-            sns.lineplot(x=test1["timestamp"], y=test1["query_count"], label="Actual")
+            sns.lineplot(x=test1["timestamp"], y=test1[target_column], label="Actual")
         else:
-            sns.lineplot(x=test1["timestamp"], y=test1["query_count"], label="Actual")
+            sns.lineplot(x=test1["timestamp"], y=test1[target_column], label="Actual")
         sns.lineplot(x=predictions["timestamp"], y=predictions["mean"], label="Predicted", linestyle="dashed")
         plt.xlabel("Timestamp")
         plt.ylabel("Query Count")
@@ -250,6 +254,11 @@ def visualize_predictions():
         return "Prediction visualization generated!", img
     except Exception as e:
         return f"Error visualizing predictions: {str(e)}", None
+
+def update_target_column(new_column):
+    global target_column
+    target_column = new_column
+    return f"Target column set to: {new_column}"
 
 # Build the Gradio UI layout.
 with gr.Blocks() as app:
@@ -311,6 +320,7 @@ with gr.Blocks() as app:
     with tabs:
         # Data Tab.
         with gr.TabItem("Data"):
+            gr.Markdown("### Load and Visualize Data")
             with gr.Row():
                 target_column_input = gr.Textbox(label="Target Column", value="query_count")
                 set_target_column_btn = gr.Button("Set Target Column")
@@ -320,7 +330,6 @@ with gr.Blocks() as app:
                 inputs=[target_column_input],
                 outputs=[target_column_message]
             )
-            gr.Markdown("### Load and Visualize Data")
             with gr.Row():
                 dataset_type_input = gr.Radio(
                     choices=["provisioned", "serverless"],
@@ -336,10 +345,6 @@ with gr.Blocks() as app:
                 inputs=[dataset_type_input, instance_number_input],
                 outputs=[data_message, data_preview]
             )
-<<<<<<< Updated upstream
-=======
-
->>>>>>> Stashed changes
             
             visualize_data_btn = gr.Button("Visualize Data")
             viz_message = gr.Textbox(label="Visualization Message", interactive=False)

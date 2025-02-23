@@ -5,8 +5,7 @@ from typing import Dict, List
 from autogluon.timeseries import TimeSeriesPredictor
 from sklearn.metrics import mean_absolute_error, mean_squared_error
 from utility.helpers import DataManager
-from autogluon.common.space import Int, Real, Categorical
-import autogluon.common.space as space
+
 
 class DeepAR:
     """
@@ -22,21 +21,18 @@ class DeepAR:
         self.freq = freq
         self.model = None
 
+        # Default hyperparameters for the DeepAR model.
+        default_deepar_hp = {
+            "epochs": 50,
+            "learning_rate": 1e-3,
+            "num_layers": 2,
+            "hidden_size": 40,
+            "dropout_rate": 0.1,
+            "batch_size": 32,
+            "context_length": prediction_length,
+        }
         # Force usage of DeepAR by setting hyperparameters under the "DeepAR" key.
-        self.hyperparameters = {
-                "DeepAR": {
-                    "num_encoder_layers": Int(2, 3),
-                    "d_model": Int(64, 256),
-                    "dropout_rate": Real(0.0, 0.5),
-                    "lr": Real(1e-4, 1e-2, log=True),
-                    "context_length": 168,
-                    "batch_size": Categorical(16, 32),
-                    "max_epochs": Int(30, 100),
-                    "weight_decay": Int(0,1e-8),
-                    "hidden_size": space.Int(20, 100),
-                    "dropout_rate": space.Categorical(0.1, 0.3),
-                },
-            }
+        self.hyperparameters = hyperparameters or {"DeepAR": default_deepar_hp}
 
     def prepare_data(self, data: pd.DataFrame, target_column: str = "query_count") -> pd.DataFrame:
         """
@@ -65,11 +61,10 @@ class DeepAR:
             freq=self.freq,
             eval_metric='SMAPE'
         )
+        # Fit the predictor using the specified DeepAR hyperparameters.
         self.model.fit(
             train_data=prepared_data,
             hyperparameters=self.hyperparameters,
-            hyperparameter_tune_kwargs="auto",
-            enable_ensemble=False,
         )
         print("Training completed using DeepAR.")
 
@@ -129,13 +124,11 @@ class DeepAR:
         forecast = predictions_df["mean"].values
         actual = actual_forecast[target_column].values
 
-        # Add a small epsilon to avoid division by zero.
-        epsilon = 1e-10
 
-        mae = np.mean(np.abs(forecast - actual))
-        q_errors = np.maximum(forecast / (actual + epsilon), actual / (forecast + epsilon))
+        mae = mean_absolute_error(actual, forecast)
+        q_errors = np.maximum((np.maximum(forecast,1) / np.maximum(actual,1)) , (np.maximum(actual ,1)/ np.maximum(forecast,1)))
         q_error = np.mean(q_errors)
-        rme = np.mean(np.abs(forecast - actual) / (np.abs(actual) + epsilon))
+        rme = np.sqrt(mean_squared_error(actual, forecast))
 
         metrics = {
             "q_error": q_error,
@@ -231,7 +224,7 @@ class SeasonalNaiveForecasting:
         self.sorted_df = None
         self.prediction_length = prediction_length
 
-    def train(self, train_df, test_df):
+    def train(self, train_df, test_df, target_column="query_count"):
         """
         Generate forecasts using a seasonal naive approach.
         The forecast repeats the last week's values from the training data.
@@ -245,13 +238,13 @@ class SeasonalNaiveForecasting:
             raise ValueError("ERROR: Not enough past data to make seasonal naive predictions!")
 
         # Use the last `prediction_length` values from the extracted week.
-        last_week_values = last_week_data["query_count"].values[-self.prediction_length:]
+        last_week_values = last_week_data[target_column].values[-self.prediction_length:]
         forecast_timestamps = test_df["timestamp"][:self.prediction_length].values
 
         # Create a DataFrame with the forecasted values.
         forecast_df = pd.DataFrame({
             "timestamp": forecast_timestamps,
-            "query_count": last_week_values
+            target_column: last_week_values
         })
         return forecast_df
 
@@ -260,38 +253,19 @@ class SeasonalNaiveForecasting:
         Compute Q-error along with other evaluation metrics (MAE, RMSE, MAPE, sMAPE).
         """
         epsilon = 1e-10
-        q_errors = np.maximum(predicted / (actuals + epsilon), actuals / (predicted + epsilon))
-        fraction_within_2 = np.mean((actuals / 2 <= predicted) & (predicted <= actuals * 2))
-        q_error_percentiles = {f"P{p}": np.percentile(q_errors, p) for p in range(10, 100, 10)}
+        print(actuals)
+        print(predicted)
+        q_errors = np.maximum((np.maximum(predicted,1) / np.maximum(actuals,1)) , (np.maximum(actuals ,1)/ np.maximum(predicted,1)))
+    
+        q_error_mean = np.mean(q_errors)
 
         mae = mean_absolute_error(actuals, predicted)
         rmse = np.sqrt(mean_squared_error(actuals, predicted))
-        mape = np.mean(np.abs((actuals - predicted) / (actuals + epsilon))) * 100
-        smape = np.mean(2 * np.abs(actuals - predicted) / (np.abs(actuals) + np.abs(predicted) + epsilon)) * 100
 
         return {
             "MAE": mae,
             "RMSE": rmse,
-            "MAPE": mape,
-            "sMAPE": smape,
-            "Fraction Within Factor of 2": fraction_within_2,
-            "Q-Error Percentiles": q_error_percentiles
-        }
-
-    def run(self):
-        """
-        Run the full forecasting pipeline.
-        This method is intended to handle data splits, forecasting, and evaluation.
-        """
-        # 'train_test_split_weekly' method must be implemented externally in the DataManager.
-        train_test_splits = DataManager().train_test_split()
-
-        # Loop through each train-test split, perform forecasting and print evaluation metrics.
-        for i, (train_df, test_df) in enumerate(train_test_splits):
-            forecast = self.train(train_df, test_df)
-            results = self.evaluate_q_error(test_df["query_count"].values, forecast["query_count"].values)
-            print(f"Evaluation Metrics for Split {i+1}: {results}")
-
+            "Q_error": q_error_mean}
 
 ###############################################################################
 # RNN Time Series Forecasting Model using LSTM
@@ -427,19 +401,15 @@ class RNNModel:
         # Q-error
         epsilon = 1e-10
         q_errors = np.maximum(
-            y_predicted / (y_actual + epsilon),
-            y_actual / (y_predicted + epsilon)
+            (np.maximum(y_predicted,1) / np.maximum(y_actual,1)),
+            (np.maximum(y_actual,1) / np.maximum(y_predicted,1) )
         )
         q_error_mean = np.mean(q_errors)
-        q_error_median = np.median(q_errors)
-        q_error_90 = np.percentile(q_errors, 90)
 
         return {
             "MAE": mae,
             "RMSE": rmse,
-            "Q-Error Mean": q_error_mean,
-            "Q-Error Median": q_error_median,
-            "Q-Error 90th": q_error_90
+            "Q-Error Mean": q_error_mean
         }
 
 
@@ -461,17 +431,17 @@ class PatchTST:
         self.freq = freq
         self.model = None
 
-        self.hyperparameters = {"PatchTST": {
-            "num_encoder_layers": Int(2, 5),
-            "d_model": Int(64, 256),
-            "dropout_rate": Real(0.0, 0.5),
-            "lr": Real(1e-4, 1e-2, log=True),
-            "context_length": 48,
-            "batch_size": Categorical(16, 32),
-            "max_epochs": Int(30, 100),
-            "weight_decay": Int(1e-8, 0),
+        default_patchtst_hp = {
+            "num_layers": 3,
+            "hidden_size": 128,
+            "dropout_rate": 0.2,
+            "learning_rate": 5e-4,
+            "context_length": prediction_length * 2,
+            "batch_size": 16,
+            "max_epochs": 50,
+            "patience": 5,
         }
-}
+        self.hyperparameters = hyperparameters or {"PatchTST": default_patchtst_hp}
 
     def prepare_data(self, data: pd.DataFrame, target_column: str = "query_count") -> pd.DataFrame:
         """
@@ -495,12 +465,7 @@ class PatchTST:
             freq=self.freq,
             eval_metric='SMAPE'
         )
-        self.model.fit(
-            train_data=prepared_data,
-            hyperparameters=self.hyperparameters,
-            hyperparameter_tune_kwargs="auto",
-            enable_ensemble=False,
-        )
+        self.model.fit(train_data=prepared_data, hyperparameters=self.hyperparameters)
         print("PatchTST Training Completed.")
 
     def predict(self, test_data: pd.DataFrame, target_column: str = "query_count") -> pd.DataFrame:
@@ -535,10 +500,10 @@ class PatchTST:
         actual = test_data[target_column].values
         forecast = predictions_df["mean"].values[:len(actual)]
 
-        mae = np.mean(np.abs(forecast - actual))
-        q_errors = np.maximum(forecast / (actual + 1e-10), actual / (forecast + 1e-10))
+        mae = mean_absolute_error(actual, forecast)
+        q_errors = np.maximum((np.maximum(forecast,1) / np.maximum(actual,1)) , (np.maximum(actual ,1)/ np.maximum(forecast,1)))
         q_error = np.mean(q_errors)
-        rme = np.mean(np.abs(forecast - actual) / (np.abs(actual) + 1e-10))
+        rme = np.sqrt(mean_squared_error(actual, forecast))
 
         return {"q_error": q_error, "mae": mae, "rme": rme}
 
