@@ -32,7 +32,7 @@ class DeepAR:
                     "context_length": 168,
                     "batch_size": Categorical(16, 32),
                     "max_epochs": Int(30, 100),
-                    "weight_decay": Int(1e-8, 0),
+                    "weight_decay": Int(0,1e-8),
                     "hidden_size": space.Int(20, 100),
                     "dropout_rate": space.Categorical(0.1, 0.3),
                 },
