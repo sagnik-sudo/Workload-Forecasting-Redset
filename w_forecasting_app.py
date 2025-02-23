@@ -311,6 +311,15 @@ with gr.Blocks() as app:
     with tabs:
         # Data Tab.
         with gr.TabItem("Data"):
+            with gr.Row():
+                target_column_input = gr.Textbox(label="Target Column", value="query_count")
+                set_target_column_btn = gr.Button("Set Target Column")
+            target_column_message = gr.Textbox(label="Status", interactive=False)
+            set_target_column_btn.click(
+                update_target_column,
+                inputs=[target_column_input],
+                outputs=[target_column_message]
+            )
             gr.Markdown("### Load and Visualize Data")
             with gr.Row():
                 dataset_type_input = gr.Radio(
@@ -327,6 +336,10 @@ with gr.Blocks() as app:
                 inputs=[dataset_type_input, instance_number_input],
                 outputs=[data_message, data_preview]
             )
+<<<<<<< Updated upstream
+=======
+
+>>>>>>> Stashed changes
             
             visualize_data_btn = gr.Button("Visualize Data")
             viz_message = gr.Textbox(label="Visualization Message", interactive=False)
