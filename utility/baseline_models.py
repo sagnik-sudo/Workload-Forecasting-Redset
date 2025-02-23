@@ -457,14 +457,13 @@ class PatchTST:
         self.model = None
 
         default_patchtst_hp = {
-            "num_layers": 3,
-            "hidden_size": 128,
-            "dropout_rate": 0.2,
-            "learning_rate": 5e-4,
+            "num_encoder_layers ": 2,
+            "d_model": 128,
+            "lr": 5e-4,
             "context_length": prediction_length * 2,
             "batch_size": 16,
             "max_epochs": 50,
-            "patience": 5,
+            "weight_decay": 1e-8,
         }
         self.hyperparameters = hyperparameters or {"PatchTST": default_patchtst_hp}
 
