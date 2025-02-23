@@ -25,6 +25,14 @@ class DeepAR:
         # Force usage of DeepAR by setting hyperparameters under the "DeepAR" key.
         self.hyperparameters = {
                 "DeepAR": {
+                    "num_encoder_layers": Int(2, 3),
+                    "d_model": Int(64, 256),
+                    "dropout_rate": Real(0.0, 0.5),
+                    "lr": Real(1e-4, 1e-2, log=True),
+                    "context_length": 168,
+                    "batch_size": Categorical(16, 32),
+                    "max_epochs": Int(30, 100),
+                    "weight_decay": Int(1e-8, 0),
                     "hidden_size": space.Int(20, 100),
                     "dropout_rate": space.Categorical(0.1, 0.3),
                 },
@@ -453,22 +461,17 @@ class PatchTST:
         self.freq = freq
         self.model = None
 
-        default_patchtst_hp = {
-            "num_layers": Int(2, 5),
-            "hidden_size": Int(64, 256),
+        self.hyperparameters = {"PatchTST": {
+            "num_encoder_layers": Int(2, 5),
+            "d_model": Int(64, 256),
             "dropout_rate": Real(0.0, 0.5),
-            "learning_rate": Real(1e-4, 1e-2, log=True),
+            "lr": Real(1e-4, 1e-2, log=True),
             "context_length": 48,
             "batch_size": Categorical(16, 32),
             "max_epochs": Int(30, 100),
-            "patience": Int(3, 10),
+            "weight_decay": Int(1e-8, 0),
         }
-        self.hyperparameters = {
-                "PatchTST": {
-                    "hidden_size": space.Int(20, 100),
-                    "dropout_rate": space.Categorical(0.1, 0.3),
-                },
-            }
+}
 
     def prepare_data(self, data: pd.DataFrame, target_column: str = "query_count") -> pd.DataFrame:
         """
