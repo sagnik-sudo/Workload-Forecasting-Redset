@@ -30,14 +30,16 @@ con = duckdb.connect(duckdb_db_path)
 # Remove the existing temporary table if it exists.
 con.execute("DROP TABLE IF EXISTS temp_data;")
 
-# Create a table with valid data by reading the Parquet file and filtering out rows 
+# Create a table with valid data by reading the Parquet file and filtering out rows
 # with NULL or invalid arrival_timestamp values.
-con.execute(f"""
+con.execute(
+    f"""
     CREATE TABLE temp_data AS 
     SELECT * FROM read_parquet('{input_parquet_file}')
     WHERE arrival_timestamp IS NOT NULL
     AND try_cast(arrival_timestamp AS TIMESTAMP) IS NOT NULL;
-""")
+"""
+)
 print("Parquet file loaded into DuckDB successfully.")
 
 # Get the number of valid rows after filtering.
@@ -46,7 +48,9 @@ print(f"Total valid rows in DuckDB: {row_count}")
 
 # Define the number of chunks to split the data for sorting.
 num_chunks = 10
-sorted_chunk_files = [f"{external_drive_path}/sorted_chunk_{i}.parquet" for i in range(num_chunks)]
+sorted_chunk_files = [
+    f"{external_drive_path}/sorted_chunk_{i}.parquet" for i in range(num_chunks)
+]
 
 print(f"Step 2: Sorting data in {num_chunks} smaller chunks...")
 
@@ -54,28 +58,34 @@ print(f"Step 2: Sorting data in {num_chunks} smaller chunks...")
 for i, chunk_path in enumerate(sorted_chunk_files):
     print(f"Sorting chunk {i+1}/{num_chunks}...")
     # Use window function row_number() to distribute rows into chunks and sort each chunk.
-    con.execute(f"""
+    con.execute(
+        f"""
         COPY (
             SELECT * FROM (
                 SELECT *, row_number() OVER () AS rn FROM temp_data
             ) WHERE rn % {num_chunks} = {i}
             ORDER BY arrival_timestamp
         ) TO '{chunk_path}' (FORMAT 'parquet');
-    """)
+    """
+    )
     print(f"Chunk {i+1} sorted and saved to: {chunk_path}")
 
 print("Step 3: Merging sorted chunks into the final sorted file...")
 
 # Construct a query to combine all sorted chunk files.
-merge_query = " UNION ALL ".join([f"SELECT * FROM read_parquet('{chunk}')" for chunk in sorted_chunk_files])
+merge_query = " UNION ALL ".join(
+    [f"SELECT * FROM read_parquet('{chunk}')" for chunk in sorted_chunk_files]
+)
 
 # Merge all sorted chunks and order the complete data based on arrival_timestamp.
-con.execute(f"""
+con.execute(
+    f"""
     COPY (
         {merge_query}
         ORDER BY arrival_timestamp
     ) TO '{final_sorted_file}' (FORMAT 'parquet');
-""")
+"""
+)
 
 print(f"Sorting complete! Final sorted file saved at: {final_sorted_file}")
 

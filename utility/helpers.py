@@ -58,9 +58,19 @@ class DataManager:
                 code=1004,
             )
 
-        expected_columns = {"instance_id", "timestamp", "query_count", "runtime", "bytes_scanned"}
-        if set(df.columns) != expected_columns or len(df.columns) != len(expected_columns):
-            raise DataLoadError("The loaded dataframe does not have the required columns.", code=1005)
+        expected_columns = {
+            "instance_id",
+            "timestamp",
+            "query_count",
+            "runtime",
+            "bytes_scanned",
+        }
+        if set(df.columns) != expected_columns or len(df.columns) != len(
+            expected_columns
+        ):
+            raise DataLoadError(
+                "The loaded dataframe does not have the required columns.", code=1005
+            )
 
         # Retain only records matching the provided instance_id.
         self.data = df[df["instance_id"] == self.instance_id]
@@ -83,7 +93,9 @@ class DataManager:
         """
         if data is None:
             if self.data is None:
-                raise DataSplitError("No data available to split. Please load data first.", code=2001)
+                raise DataSplitError(
+                    "No data available to split. Please load data first.", code=2001
+                )
             data = self.data.copy()
         else:
             data = data.copy()
@@ -102,7 +114,8 @@ class DataManager:
 
         if N < 3:
             raise DataSplitError(
-                "Not enough weeks in data for splitting. Need at least 3 weeks.", code=2000
+                "Not enough weeks in data for splitting. Need at least 3 weeks.",
+                code=2000,
             )
 
         # Define splits based on sequential weeks.
