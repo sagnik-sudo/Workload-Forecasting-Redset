@@ -13,7 +13,7 @@ This project utilizes the dataset available here: [Redset information](https://g
 
 ## How to use
 - Clone the repository to your local machine.
-- Open the project folder in your code editor and run the forecasting_app.py to launch the application. Alternatively, run the workload_forecasting.ipynb notebook to view the machine learning model output.
+- Open the project folder in your code editor and run the main.py to launch the application. Alternatively, run the workload_forecasting.ipynb notebook to view the machine learning model output.
 - Select the model you wish to use for forecasting.
 - Load the data and choose the visualization option to see the distribution of the three metrics: query counts, bytes scanned, and execution time.
 - Pick the instance for which you want to forecast results.
@@ -45,8 +45,8 @@ while read requirement; do conda install --yes $requirement || pip install $requ
 Follow these steps to run the Workload Forecasting Gradio App:
 ```bash
 venv\Scripts\activate
-cd path/to/your/project
-python -m w_forecasting_app.py
+cd ./g8
+python -m main.py
 ```
 The application will be accessible locally at: http://127.0.0.1:7860
 
