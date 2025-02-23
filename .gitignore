@@ -138,6 +138,8 @@ full.parquet
 .csv
 # AutoGluon
 autogluon*/
+lightning_logs/
+models/
 
 # Lightning Logs
 lightning_logs/
