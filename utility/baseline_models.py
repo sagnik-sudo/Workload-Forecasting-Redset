@@ -5,9 +5,8 @@ from typing import Dict, List
 from autogluon.timeseries import TimeSeriesPredictor
 from sklearn.metrics import mean_absolute_error, mean_squared_error
 from utility.helpers import DataManager
-from autogluon.core.space import Int, Real, Categorical
-from autogluon.core import space
-print(space)
+from autogluon.common.space import Int, Real, Categorical
+import autogluon.common.space as space
 
 class DeepAR:
     """
@@ -63,8 +62,17 @@ class DeepAR:
             freq=self.freq,
             eval_metric='SMAPE'
         )
-        # Fit the predictor using the specified DeepAR hyperparameters with auto hyperparameter tuning.
-        self.model.fit(train_data=prepared_data, hyperparameter_tune_kwargs="auto")
+        self.model.fit(
+            train_data=prepared_data,
+            hyperparameters={
+                "DeepAR": {
+                    "hidden_size": space.Int(20, 100),
+                    "dropout_rate": space.Categorical(0.1, 0.3),
+                },
+            },
+            hyperparameter_tune_kwargs="auto",
+            enable_ensemble=False,
+        )
         print("Training completed using DeepAR.")
 
     def predict(self, test_data: pd.DataFrame, target_column: str = "query_count") -> pd.DataFrame:
@@ -455,16 +463,15 @@ class PatchTST:
         self.freq = freq
         self.model = None
 
-        # Default hyperparameters search space for the PatchTST model.
         default_patchtst_hp = {
-            "num_layers": Int(2, 5),  # Search between 2 and 5 layers
-            "hidden_size": Int(64, 256),  # Search between 64 and 256 units
-            "dropout_rate": Real(0.0, 0.5),  # Search for dropout between 0 and 0.5
-            "learning_rate": Real(1e-4, 1e-2, log=True),  # Log scale search between 1e-4 and 1e-2
-            "context_length": prediction_length * 2,  # Fixed based on prediction_length
-            "batch_size": Categorical(16, 32, 64),  # Choose among these batch sizes
-            "max_epochs": Int(30, 100),  # Search between 30 and 100 epochs
-            "patience": Int(3, 10),  # Search for patience between 3 and 10
+            "num_layers": Int(2, 5),
+            "hidden_size": Int(64, 256),
+            "dropout_rate": Real(0.0, 0.5),
+            "learning_rate": Real(1e-4, 1e-2, log=True),
+            "context_length": 48,
+            "batch_size": Categorical(16, 32),
+            "max_epochs": Int(30, 100),
+            "patience": Int(3, 10),
         }
         self.hyperparameters = hyperparameters or {"PatchTST": default_patchtst_hp}
 
